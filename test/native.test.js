@@ -213,7 +213,6 @@ test('launcher starts a detached local process, waits for readiness, and reuses 
   const serverPath = path.join(cwd, 'server.mjs');
   const logPath = path.join(cwd, 'logs', 'client.log');
   const pidPath = path.join(cwd, 'pid');
-  const stoppedPath = path.join(cwd, 'stopped');
   await writeFile(serverPath, `
     import http from 'node:http';
     import { writeFileSync } from 'node:fs';
@@ -221,10 +220,7 @@ test('launcher starts a detached local process, waits for readiness, and reuses 
       if (request.url === '/shutdown') {
         response.setHeader('Connection', 'close');
         response.end('Stopping');
-        server.close(() => {
-          writeFileSync('stopped', 'yes');
-          process.exit(0);
-        });
+        server.close(() => setTimeout(() => process.exit(0), 100));
         return;
       }
       writeFileSync('last-request', request.url);
@@ -245,19 +241,21 @@ test('launcher starts a detached local process, waits for readiness, and reuses 
   t.after(async () => {
     try {
       await fetch(url + '/shutdown');
+    } finally {
+      const pid = Number(await readFile(pidPath, 'utf8'));
+      if (await isClientReady(url)) process.kill(pid, 'SIGKILL');
+      // Windows keeps the working directory and log locked until the process exits.
       const deadline = Date.now() + 5000;
       while (true) {
         try {
-          await readFile(stoppedPath);
-          break;
+          process.kill(pid, 0);
         } catch (error) {
-          if (error.code !== 'ENOENT') throw error;
+          if (error.code === 'ESRCH') break;
+          throw error;
         }
         if (Date.now() > deadline) throw new Error('Fixture process did not stop.');
         await setTimeout(20);
       }
-    } finally {
-      if (await isClientReady(url)) process.kill(Number(await readFile(pidPath, 'utf8')), 'SIGKILL');
       await rm(cwd, { recursive: true, force: true });
     }
   });
