@@ -172,6 +172,27 @@ test('first extension use applies the chosen folder to a running client and comp
   assert.equal(reopened.app.queue.snapshot().torrents[0].path, finalFolder);
 });
 
+test('toolbar folder changes apply to a running client and cancellation preserves its destination', async t => {
+  const { app, root, settingsFile, url } = await setup(t);
+  const first = path.join(root, 'first');
+  const second = path.join(root, 'second');
+  await mkdir(first);
+  await mkdir(second);
+  await saveCompletedDirectory(first, settingsFile);
+  await startClient({ url, settingsFile });
+  assert.equal(app.queue.completedDir, first);
+  await assert.rejects(startClient({
+    url, settingsFile, selectAgain: true, chooseDirectory: async () => undefined
+  }), /selection canceled/);
+  assert.equal(app.queue.completedDir, first);
+  assert.equal(await readCompletedDirectory(settingsFile), first);
+  assert.deepEqual(await startClient({
+    url, settingsFile, selectAgain: true, chooseDirectory: async () => second
+  }), { started: false });
+  assert.equal(app.queue.completedDir, second);
+  assert.equal(await readCompletedDirectory(settingsFile), second);
+});
+
 test('folder settings reload is protected and never applies unselected or invalid folders', async t => {
   const { app, root, settingsFile, url, post } = await setup(t);
   const initial = await (await fetch(url + '/api/settings')).json();

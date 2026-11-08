@@ -104,6 +104,7 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
   const chrome = {
     runtime: {
       id: sender.id,
+      getURL: name => `chrome-extension://${sender.id}/${name}`,
       onMessage: { addListener(handler) { onMessage = handler; } },
       sendMessage: message => dispatch(message),
       connectNative(host) {
@@ -115,7 +116,6 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
           onDisconnect: { addListener(listener) { disconnectListener = listener; } },
           disconnect() { port.disconnected = true; },
           postMessage(request) {
-            assert.equal(tabs.length, 0);
             nativeRequests.push({ host, request });
             const reply = (result = nativeResult) => {
               if (nativeError) {
@@ -178,6 +178,7 @@ test('manifest requests only native messaging and uses local scripts without ext
   assert.deepEqual(manifest.permissions, ['nativeMessaging']);
   assert.equal(manifest.host_permissions, undefined);
   assert.equal(manifest.externally_connectable, undefined);
+  assert.equal(manifest.action.default_popup, 'popup.html');
   assert.deepEqual(manifest.content_scripts[0].js, ['shared.js', 'content.js']);
   assert.equal(manifest.minimum_chrome_version, '111');
   assert.equal(manifest.content_scripts[1].world, 'MAIN');
@@ -187,7 +188,8 @@ test('manifest requests only native messaging and uses local scripts without ext
     assert.equal(script.match_about_blank, true);
     assert.equal(script.run_at, 'document_start');
   }
-  for (const name of [...manifest.content_scripts.flatMap(script => script.js), manifest.background.service_worker]) {
+  for (const name of [...manifest.content_scripts.flatMap(script => script.js), manifest.background.service_worker,
+    manifest.action.default_popup, 'popup.css', 'popup.js']) {
     assert.ok((await readFile(new URL(name, folder), 'utf8')).length > 0);
   }
   for (const size of [16, 48, 128]) {
@@ -417,4 +419,40 @@ test('native startup failure prevents opening a broken client tab', async () => 
     assert.equal(fixture.alerts.length, 1);
     assert.match(fixture.alerts[0], /could not open the client/);
   }
+});
+
+test('only the toolbar can open downloads or change the final folder without a magnet', async () => {
+  const fixture = await setup();
+  const popup = { id: sender.id, url: `chrome-extension://${sender.id}/popup.html` };
+  assert.equal((await fixture.dispatch({ type: 'client-control', action: 'open' }, popup)).ok, true);
+  assert.equal(fixture.tabs[0].url, 'http://127.0.0.1:3000/');
+  assert.equal(fixture.tabs[0].active, true);
+  assert.equal((await fixture.dispatch({ type: 'client-control', action: 'change-folder' }, popup)).ok, true);
+  assert.equal(fixture.nativeRequests[1].request.action, 'change-folder');
+  assert.equal(fixture.tabs.length, 1);
+  for (const from of [sender, { ...popup, id: 'another-extension' }, { ...popup, url: popup.url + '?fake' }]) {
+    assert.equal((await fixture.dispatch({ type: 'client-control', action: 'change-folder' }, from)).ok, false);
+  }
+  for (const action of ['exec', null]) {
+    assert.equal((await fixture.dispatch({ type: 'client-control', action }, popup)).ok, false);
+  }
+  assert.equal((await fixture.dispatch({ type: 'client-control', action: 'open', url: 'https://example.test' }, popup)).ok, false);
+  assert.equal(fixture.nativeRequests.length, 2);
+});
+
+test('folder changes wait for startup and magnet approvals wait for an active folder change', async () => {
+  const fixture = await setup({ deferNative: true });
+  const popup = { id: sender.id, url: `chrome-extension://${sender.id}/popup.html` };
+  const opening = fixture.dispatch({ type: 'client-control', action: 'open' }, popup);
+  const changing = fixture.dispatch({ type: 'client-control', action: 'change-folder' }, popup);
+  assert.equal(fixture.nativeRequests.length, 1);
+  fixture.replyNative({ ok: true });
+  assert.equal((await opening).ok, true);
+  assert.equal(fixture.nativeRequests[1].request.action, 'change-folder');
+  const approval = fixture.dispatch({ type: 'open-light-torrent', magnet });
+  assert.equal(fixture.nativeRequests.length, 2);
+  fixture.replyNative({ ok: true });
+  assert.equal((await changing).ok, true);
+  assert.equal((await approval).ok, true);
+  assert.equal(fixture.tabs.length, 2);
 });

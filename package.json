@@ -12,7 +12,7 @@
     "start": "node server.js",
     "install:helper": "node native/install.js",
     "test": "node --test",
-    "check": "node --check server.js && node --check lib/queue.js && node --check lib/settings.js && node --check public/app.js && node --check extension/shared.js && node --check extension/content.js && node --check extension/shadow-roots.js && node --check extension/background.js && node --check native/launcher.js && node --check native/folders.js && node --check native/host.js && node --check native/install.js"
+    "check": "node --check server.js && node --check lib/queue.js && node --check lib/settings.js && node --check public/app.js && node --check extension/shared.js && node --check extension/content.js && node --check extension/popup.js && node --check extension/shadow-roots.js && node --check extension/background.js && node --check native/launcher.js && node --check native/folders.js && node --check native/host.js && node --check native/install.js"
   },
   "dependencies": {
     "parse-torrent": "^11.0.24",

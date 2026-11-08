@@ -35,11 +35,11 @@ export function writeMessage(output, message) {
 }
 
 export async function handleRequest(request, launch = startClient) {
-  if (!request || typeof request !== 'object' ||
-      request.action !== 'start-client' || Object.keys(request).length !== 1) {
-    throw new Error('Only the start-client action is supported.');
+  if (!request || typeof request !== 'object' || Array.isArray(request) ||
+      !['start-client', 'change-folder'].includes(request.action) || Object.keys(request).length !== 1) {
+    throw new Error('Only the start-client and change-folder actions are supported.');
   }
-  return { ok: true, ...await launch() };
+  return { ok: true, ...await (request.action === 'change-folder' ? launch({ selectAgain: true }) : launch()) };
 }
 
 async function main() {

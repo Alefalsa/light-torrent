@@ -1,4 +1,5 @@
 globalThis.LightTorrentBridge = Object.freeze({
+  clientOrigin: 'http://127.0.0.1:3000',
   normalizeMagnet(value) {
     if (typeof value !== 'string') return null;
     const magnet = value.trim().replace(/^magnet:/i, 'magnet:');
@@ -8,6 +9,6 @@ globalThis.LightTorrentBridge = Object.freeze({
     const normalized = this.normalizeMagnet(magnet);
     if (!normalized) throw new Error('Invalid or oversized magnet link.');
     // Fragments stay in the browser, rather than being sent in HTTP requests.
-    return `http://127.0.0.1:3000/#magnet=${encodeURIComponent(normalized)}`;
+    return `${this.clientOrigin}/#magnet=${encodeURIComponent(normalized)}`;
   }
 });

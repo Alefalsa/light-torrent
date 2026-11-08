@@ -61,9 +61,9 @@ export async function pickCompletedDirectory({ platform = process.platform, run 
 }
 
 export async function ensureCompletedDirectory({
-  settingsFile = settingsPath(), chooseDirectory = pickCompletedDirectory
+  settingsFile = settingsPath(), chooseDirectory = pickCompletedDirectory, selectAgain = false
 } = {}) {
-  const saved = await readCompletedDirectory(settingsFile);
+  const saved = selectAgain ? undefined : await readCompletedDirectory(settingsFile);
   if (saved) return saved;
   await mkdir(path.dirname(settingsFile), { recursive: true, mode: 0o700 });
   const { default: lockfile } = await import('proper-lockfile');
@@ -75,7 +75,7 @@ export async function ensureCompletedDirectory({
     onCompromised(error) { lockError = error; }
   });
   try {
-    const selected = await readCompletedDirectory(settingsFile);
+    const selected = selectAgain ? undefined : await readCompletedDirectory(settingsFile);
     if (selected) return selected;
     const directory = await chooseDirectory();
     if (lockError) throw lockError;

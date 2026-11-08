@@ -63,6 +63,11 @@ test('native protocol rejects bad framing, invalid JSON, and arbitrary commands'
   assert.equal(launches, 0);
   assert.deepEqual(await handleRequest({ action: 'start-client' }, async () => ({ started: false })),
     { ok: true, started: false });
+  assert.deepEqual(await handleRequest({ action: 'change-folder' }, async options => {
+    assert.deepEqual(options, { selectAgain: true });
+    return { started: false };
+  }), { ok: true, started: false });
+  await assert.rejects(handleRequest({ action: 'change-folder', directory: '/untrusted' }), /Only the start-client/);
 });
 
 test('real native host emits framed failures, never unframed stdout', async () => {

@@ -17,7 +17,9 @@
       <div class="brand"><span class="logo" aria-hidden="true">↧</span><div><h1>Light Torrent</h1><p>Less clutter. More downloading.</p></div></div>
       <span class="connection" id="connection" role="status">Connecting</span>
     </header>
+    <div class="message" id="connection-notice" role="status" hidden><span id="connection-message"></span><button class="secondary" id="reconnect" type="button">Reconnect</button></div>
     <div class="message" id="message" role="alert" hidden></div>
+    <button class="secondary" id="retry-magnet" type="button" hidden>Retry magnet</button>
     <div class="message warning" id="engine-error" role="status" hidden></div>
     <p class="idle-note" id="idle-note" role="status" hidden></p>
     <section class="stats" aria-label="Transfer totals">
@@ -28,9 +30,9 @@
     <section aria-labelledby="queue-title">
       <div class="queue-heading"><h2 id="queue-title">Your downloads <span id="total-count">0</span></h2><span>Saved automatically</span></div>
       <div id="torrents"></div>
-      <div id="empty" class="empty"><div class="empty-icon" aria-hidden="true">↓</div><h3>A little space for something good.</h3><p>Approve a magnet link in the browser extension to get started.</p></div>
+      <div id="empty" class="empty"><div class="empty-icon" aria-hidden="true">↓</div><h3>A little space for something good.</h3><p>Approve a magnet link in the browser extension to get started.</p><p>Use the extension toolbar to open downloads or change the final folder.</p></div>
     </section>
-    <footer><span class="folder-icon" aria-hidden="true">▱</span><span>Saving to <code id="download-dir">...</code></span><span class="footer-note">Only download content you have permission to share.</span></footer>
+    <footer><span class="folder-icon" aria-hidden="true">▱</span><span>Saving to <code id="download-dir">...</code></span><span>Change the final folder from the extension toolbar.</span><span class="footer-note">Only download content you have permission to share.</span></footer>
   </main>
   <template id="torrent-template">
     <article class="torrent">

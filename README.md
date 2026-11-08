@@ -134,10 +134,13 @@ the torrent simply stops and is marked Completed without moving files.
 
 The folder preference is stored in `%LOCALAPPDATA%\Light Torrent\settings.json`
 on Windows or `~/Library/Application Support/Light Torrent/settings.json`
-on macOS. To choose again, remove only this settings file, then approve another
-magnet. Missing, inaccessible, or invalid saved folders produce an error rather
+on macOS. To choose again, use **Change final folder** in the extension toolbar.
+Canceling or choosing an unusable folder preserves the old preference.
+Missing, inaccessible, or invalid saved folders produce an error rather
 than silently falling back to a different destination. Already-completed files
 are not relocated, and moves already in progress retain their recorded destination.
+An explicit folder change can also recover a damaged preference without
+manually deleting its file.
 
 `DATA_DIR` can also select a different queue directory. Relative paths are resolved
 from the current working directory. The web interface binds only to IPv4 loopback,
@@ -154,6 +157,14 @@ remote-access server and should not be exposed through a reverse proxy.
   Escape dismisses the tooltip. Actual torrent errors remain visible in red.
 - The dashboard and extension share a green download-arrow icon. The dashboard
   includes a browser-tab favicon, theme color, and individually labeled progress bars.
+- Failed magnet handoffs offer **Retry magnet** on the dashboard. Only the
+  already-approved link is retried; there is still no manual input panel.
+  Duplicates show an informational notice and keep the existing download.
+- Connection notices are separate from action errors. **Reconnect** and returning
+  to the tab refresh the client session after a restart. Use **Open downloads**
+  in the extension toolbar to wake a sleeping client first.
+- Action buttons remain disabled while their request is pending or the client
+  is disconnected; polling does not re-enable an in-progress action.
 - This is a real peer-to-peer client: it can connect to ordinary TCP BitTorrent
   peers, trackers, DHT, and WebRTC peers. It is not an anonymity tool or VPN.
 - Automatic router port mapping is disabled; outbound connections still work.
@@ -182,6 +193,9 @@ Install the `extension` directory through your browser's **Load unpacked** optio
 then install the Windows or macOS native-messaging helper using the guide linked above.
 The extension always calls the helper before opening a client tab, including
 when reusing a running client on port 3000. There is no helper-free fallback.
+Its toolbar popup provides **Open downloads**, **Change final folder**, and a
+link to installation/troubleshooting instructions, without requesting extra
+browser permissions. Opening the popup alone does not start the client.
 After updating the source, reload the extension and website tabs to apply new
 icons, highlighting, and confirmation behavior.
 

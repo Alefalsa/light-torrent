@@ -51,6 +51,37 @@ test('concurrent first-use requests share one saved folder choice', async t => {
   assert.equal(prompts, 1);
 });
 
+test('explicit folder changes preserve the old preference on cancellation and replace it atomically on success', async t => {
+  const { root, settingsFile } = await temporary(t);
+  const next = path.join(root, 'next');
+  await mkdir(next);
+  await saveCompletedDirectory(root, settingsFile);
+  const before = await readFile(settingsFile, 'utf8');
+  await assert.rejects(ensureCompletedDirectory({
+    settingsFile, selectAgain: true, chooseDirectory: async () => undefined
+  }), /selection canceled/);
+  assert.equal(await readFile(settingsFile, 'utf8'), before);
+  await assert.rejects(ensureCompletedDirectory({
+    settingsFile, selectAgain: true, chooseDirectory: async () => path.join(root, 'missing')
+  }), /Cannot use/);
+  assert.equal(await readFile(settingsFile, 'utf8'), before);
+  assert.equal(await ensureCompletedDirectory({
+    settingsFile, selectAgain: true, chooseDirectory: async () => next
+  }), next);
+  assert.equal(await readCompletedDirectory(settingsFile), next);
+  assert.deepEqual(await readdir(path.dirname(settingsFile)), ['settings.json']);
+});
+
+test('explicit folder changes recover damaged preferences without deleting them first', async t => {
+  const { root, settingsFile } = await temporary(t);
+  await mkdir(path.dirname(settingsFile));
+  await writeFile(settingsFile, 'invalid settings');
+  assert.equal(await ensureCompletedDirectory({
+    settingsFile, selectAgain: true, chooseDirectory: async () => root
+  }), root);
+  assert.equal(await readCompletedDirectory(settingsFile), root);
+});
+
 test('canceling does not save a preference and the next request prompts again', async t => {
   const { root, settingsFile } = await temporary(t);
   await assert.rejects(ensureCompletedDirectory({ settingsFile, chooseDirectory: async () => undefined }), /selection canceled/);

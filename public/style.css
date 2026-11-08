@@ -64,9 +64,15 @@ footer code { overflow-wrap: anywhere; font: inherit; }
 .footer-note { margin-left: auto; }
 .message { background: #fff0ea; color: #a2493e; border: 1px solid #efcfc3; border-radius: 10px; padding: 13px 16px; margin-top: 15px; font-size: 13px; overflow-wrap: anywhere; }
 .message.info { background: #edf5ef; color: #287f68; border-color: #d4e5d9; }
+#connection-notice { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#connection-notice span { flex: 1; }
+#reconnect { flex-shrink: 0; }
+#retry-magnet { margin-top: 10px; }
+.empty p + p { margin-top: 10px; }
 .warning { background: #fff9e9; border-color: #eaddb5; color: #8a713b; }
 [hidden] { display: none !important; }
 @media (max-width: 660px) {
+  #connection-notice { align-items: flex-start; flex-direction: column; }
   main { padding: 25px 16px; } header { margin-bottom: 28px; } .brand p { font-size: 11px; }
   .stats div { padding: 0 14px; } .stats strong { font-size: 20px; }
   .stats span { font-size: 8px; letter-spacing: .5px; } .queue-heading > span { font-size: 11px; }

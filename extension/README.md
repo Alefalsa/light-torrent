@@ -97,6 +97,23 @@ if needed, wait for readiness, then
 open `http://127.0.0.1:3000` and add the magnet directly to the queue.
 There is no second confirmation or manual input panel on the dashboard.
 
+### Toolbar controls
+
+Click the Light Torrent icon in your browser's extensions menu, or pin it for
+quick access:
+
+- **Open downloads** starts or reuses the local client and opens its dashboard.
+  On first use, it asks for a final folder just like an approved magnet.
+- **Change final folder** opens the native picker without adding a torrent.
+  Cancel keeps the current preference. A valid choice is saved and applied to
+  a running client; already-completed files and moves in progress keep their
+  locations. This also lets you replace a missing or damaged preference.
+- **Setup and troubleshooting** opens this guide.
+
+The buttons are disabled while the helper is working, and failures remain
+visible in the popup. Opening the popup by itself does not launch the client.
+If you close it during a folder dialog, the native operation can still finish.
+
 Left clicks, modifier clicks, middle clicks, and keyboard activation are
 supported, including links inside ordinary frames and open shadow roots.
 JavaScript-generated clicks are ignored. Custom buttons that launch magnets
@@ -121,7 +138,8 @@ keep their recorded destination.
 
 The preference is saved in `%LOCALAPPDATA%\Light Torrent\settings.json` on
 Windows or `~/Library/Application Support/Light Torrent/settings.json` on macOS.
-To choose again, remove only that settings file and approve another magnet.
+To choose again, use **Change final folder** in the extension toolbar; you do
+not need to delete the settings file.
 An unavailable folder or damaged preference file is reported explicitly;
 downloads never silently fall back to another folder.
 
@@ -186,9 +204,9 @@ This extension does not register as your operating system's magnet handler.
 | Port 3000 is occupied by another service or an older client | Stop the specific conflicting process, then approve the magnet again. A manually started client can be stopped with Ctrl+C in its terminal. The helper always uses port 3000; changing `PORT` for a manual launch does not change the extension's target. |
 | Queue is already in use | Stop the other Light Torrent instance before retrying. After a crash, wait 30 seconds for the stale lock to expire. Do not delete the queue lock while a client is running. |
 | Running client needs to be restarted for final-folder selection | Pause active downloads and let the old client exit after two idle minutes, or stop a manually launched client with Ctrl+C. Approve the magnet again to start the updated client. |
-| Final folder is missing, inaccessible, or settings are invalid | Restore access to the saved folder, or remove only the folder preference file described above and approve another magnet to choose again. |
-| Dashboard says Sleeping | This is normal after two idle minutes. Approve another magnet through the extension to start the client again. |
-| Dashboard reports that a magnet could not be added | Read the displayed error, resolve it, and approve the link again to retry. The fragment is consumed once, so reloading the dashboard does not resubmit it. |
+| Final folder is missing, inaccessible, or settings are invalid | Restore access to the saved folder, or use **Change final folder** in the toolbar to choose a valid replacement. Canceling leaves the old preference untouched. |
+| Dashboard says Sleeping | This is normal after two idle minutes. Use **Open downloads** in the toolbar to start it again. On an older dashboard tab, use **Reconnect** or return to the tab to refresh its session. |
+| Dashboard reports that a magnet could not be added | Read the error, resolve it, and use **Retry magnet** to retry the already-approved link. It is kept only in that tab's memory: after a reload, approve the link on the original website again. |
 | Download stays at Finding metadata or has tracker warnings | Metadata needs reachable peers. Check connectivity and firewall restrictions; a torrent with no seeders may wait indefinitely. A tracker warning alone does not mean the download has failed. |
 
 If a browser suppresses repeated confirmation dialogs, reload the website
@@ -213,10 +231,12 @@ open roots; it has no extension API access and cannot start the client.
 After confirmation, the magnet is sent only to the extension's own background
 worker and placed in the local client's URL **fragment**, not a query string.
 The client consumes and removes that fragment, then adds the magnet using its
-own session token. Failures appear on the dashboard; approve the link again to
-retry. The extension never accesses the client's API or token.
-Its `nativeMessaging` permission is used only to send `{ "action": "start-client" }`
-to the installed helper. The helper accepts no commands, paths, or magnet data
+own session token. Failures appear on the dashboard with an explicit retry
+button. The extension never accesses the client's API or token.
+Its `nativeMessaging` permission sends only `{ "action": "start-client" }` or
+`{ "action": "change-folder" }` to the installed helper. Only the extension's
+own popup can request toolbar controls; website clicks can only hand off magnets.
+The helper accepts no arbitrary commands, paths, or magnet data
 and checks minimal local health/settings endpoints without reading your torrent
 queue. The helper reads a session token from the settings endpoint solely to
 apply the saved final folder through the protected settings reload endpoint.
@@ -238,7 +258,16 @@ Use the public-domain/Creative Commons links on
    links, including open shadow roots. Hover for a stronger tint or tab to a link
    for its focus ring. Changing its URL to an ordinary web link should remove
    the highlight.
+6. Open the toolbar and use **Open downloads** without a magnet. It should open
+   the dashboard without adding a queue entry.
+7. Use **Change final folder** and cancel: the old preference must remain.
+   Repeat with a valid folder and verify the dashboard shows the new destination.
+   Existing completed files must stay in their old locations.
+8. While a pause/resume request is pending, polling must not re-enable its
+   buttons. Disconnect/restart the client, then verify **Reconnect** restores
+   controls without erasing unrelated action errors.
 
 Project regression tests also cover confirmation, synthetic clicks, sender
-validation, URL encoding, native startup, failures, and direct magnet handoff. Real unpacked
+validation, URL encoding, native startup, folder re-selection, popup controls,
+reconnection, busy-action guards, failures, and direct magnet handoff. Real unpacked
 extension loading must be checked in your chosen browser.

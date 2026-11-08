@@ -73,11 +73,12 @@ export async function startClient({
   logPath = clientLogPath(),
   timeoutMs = 15000,
   settingsFile = settingsPath(),
-  chooseDirectory = pickCompletedDirectory
+  chooseDirectory = pickCompletedDirectory,
+  selectAgain = false
 } = {}) {
   const ready = await isClientReady(url, true);
   const runningSettings = ready ? await getClientSettings(url) : undefined;
-  const completedDir = await ensureCompletedDirectory({ settingsFile, chooseDirectory });
+  const completedDir = await ensureCompletedDirectory({ settingsFile, chooseDirectory, selectAgain });
   if (ready) {
     await applyCompletedDirectory(url, completedDir, runningSettings);
     return { started: false };

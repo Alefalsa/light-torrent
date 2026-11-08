@@ -4,7 +4,7 @@ import { readFile } from 'node:fs/promises';
 import { setImmediate } from 'node:timers/promises';
 import vm from 'node:vm';
 
-async function createUI({ hash = '', idleShutdownAt = null, addError = null } = {}) {
+async function createUI({ hash = '', idleShutdownAt = null, addError = null, addStatus = 400 } = {}) {
   const html = await readFile(new URL('../public/index.html', import.meta.url), 'utf8');
   const elements = new Map();
   function element(selector, scope = elements) {
@@ -14,13 +14,13 @@ async function createUI({ hash = '', idleShutdownAt = null, addError = null } = 
       const children = new Map();
       scope.set(selector, {
         textContent: '', hidden: true, value: '',
-        dataset: {}, attributes: {},
+        dataset: {}, attributes: {}, handlers: new Map(),
         classList: {
           add: name => classes.add(name), remove: name => classes.delete(name),
           contains: name => classes.has(name),
           toggle: (name, enabled) => enabled ? classes.add(name) : classes.delete(name)
         },
-        addEventListener() {},
+        addEventListener(name, handler) { this.handlers.set(name, handler); },
         setAttribute(name, value) { this.attributes[name] = value; },
         querySelector: name => element(name, children),
         append() {},
@@ -40,8 +40,12 @@ async function createUI({ hash = '', idleShutdownAt = null, addError = null } = 
   const historyChanges = [];
   const requests = [];
   const windowHandlers = new Map();
+  const documentHandlers = new Map();
+  const data = { token: 'session', torrents: [], downloadDir: '/downloads', error: null, idleShutdownAt };
+  let responseHandler;
   const context = vm.createContext({
-    document: { querySelector: element },
+    document: { querySelector: element, hidden: false,
+      addEventListener: (name, handler) => documentHandlers.set(name, handler) },
     window: { addEventListener: (name, handler) => windowHandlers.set(name, handler) },
     location,
     history: { replaceState(state, title, url) { historyChanges.push(url); location.hash = ''; } },
@@ -54,19 +58,22 @@ async function createUI({ hash = '', idleShutdownAt = null, addError = null } = 
     fetch: async (url, options) => {
       requests.push({ url, method: options.method, headers: options.headers, body: options.body });
       if (offline) throw offlineError;
+      if (responseHandler) return responseHandler(url, options);
       if (options.method === 'POST' && addError) {
-        return { ok: false, json: async () => ({ error: addError }) };
+        return { ok: false, status: addStatus, json: async () => ({ error: addError }) };
       }
       return {
         ok: true,
-        json: async () => ({ token: 'session', torrents: [], downloadDir: '/downloads', error: null, idleShutdownAt })
+        json: async () => data
       };
     }
   });
   vm.runInContext(await readFile(new URL('../public/app.js', import.meta.url), 'utf8'), context);
   await setImmediate();
   return {
-    element, context, location, historyChanges, requests, windowHandlers, clearedIntervals,
+    element, context, location, historyChanges, requests, windowHandlers, documentHandlers, clearedIntervals, data,
+    setAddError(value) { addError = value; },
+    setResponseHandler(handler) { responseHandler = handler; },
     setOffline(value, error = new Error('Network unavailable')) { offline = value; offlineError = error; },
     setNow(value) { now = value; }
   };
@@ -77,13 +84,18 @@ test('reconnection clears connection alerts without clearing action errors', asy
   assert.equal(element('#connection').textContent, 'Local & connected');
   setOffline(true);
   await vm.runInContext('refresh()', context);
-  assert.equal(element('#message').hidden, false);
-  assert.match(element('#message').textContent, /Cannot connect/);
+  assert.equal(element('#connection-notice').hidden, false);
+  assert.match(element('#connection-message').textContent, /Cannot connect/);
   setOffline(false);
   await vm.runInContext('refresh()', context);
   assert.equal(element('#connection').textContent, 'Local & connected');
   assert.equal(element('#message').hidden, true);
+  assert.equal(element('#connection-notice').hidden, true);
   vm.runInContext("message('Invalid magnet link.')", context);
+  setOffline(true);
+  await vm.runInContext('refresh()', context);
+  assert.equal(element('#message').textContent, 'Invalid magnet link.');
+  setOffline(false);
   await vm.runInContext('refresh()', context);
   assert.equal(element('#message').hidden, false);
   assert.equal(element('#message').textContent, 'Invalid magnet link.');
@@ -176,7 +188,7 @@ test('dashboard has no manual input panel and directs users to the extension', a
 test('extension handoff adds the magnet with a session token and consumes the fragment once', async () => {
   const magnet = `magnet:?xt=urn:btih:${'a'.repeat(40)}&dn=Example%20File&tr=udp%3A%2F%2Fexample.test`;
   const fixture = await createUI({ hash: `#magnet=${encodeURIComponent(magnet)}` });
-  assert.equal(fixture.element('#message').hidden, true);
+  assert.equal(fixture.element('#message').textContent, 'Download added.');
   assert.equal(fixture.location.hash, '');
   assert.deepEqual(fixture.historyChanges, ['/']);
   let submissions = fixture.requests.filter(request => request.method === 'POST');
@@ -198,7 +210,8 @@ test('failed magnet submission stays visible across refreshes with retry guidanc
   const fixture = await createUI({ hash: `#magnet=${encodeURIComponent(magnet)}`, addError: 'Queue could not be saved' });
   assert.equal(fixture.location.hash, '');
   assert.match(fixture.element('#message').textContent, /Could not add.*Queue could not be saved/);
-  assert.match(fixture.element('#message').textContent, /extension again to retry/);
+  assert.match(fixture.element('#message').textContent, /Use Retry magnet/);
+  assert.equal(fixture.element('#retry-magnet').hidden, false);
   await vm.runInContext('refresh()', fixture.context);
   assert.equal(fixture.element('#message').hidden, false);
 });
@@ -225,12 +238,115 @@ test('idle shutdown shows sleeping state and stops polling, without masking earl
   fixture.setNow(deadline + 1);
   await vm.runInContext('refresh()', fixture.context);
   assert.equal(fixture.element('#connection').textContent, 'Sleeping');
-  assert.equal(fixture.element('#message').classList.contains('info'), true);
-  assert.match(fixture.element('#message').textContent, /Approve a magnet link/);
+  assert.equal(fixture.element('#connection-notice').classList.contains('info'), true);
+  assert.match(fixture.element('#connection-message').textContent, /extension toolbar/);
   assert.equal(fixture.clearedIntervals.length, 1);
   fixture.setOffline(false);
-  await vm.runInContext('refresh()', fixture.context);
+  await fixture.element('#reconnect').handlers.get('click')();
   assert.equal(fixture.element('#connection').textContent, 'Local & connected');
   assert.equal(fixture.element('#message').hidden, true);
   assert.equal(vm.runInContext('refreshTimer', fixture.context), 2);
+});
+
+test('failed magnets can be retried in place and duplicates are informative, not resubmitted', async () => {
+  const magnet = `magnet:?xt=urn:btih:${'a'.repeat(40)}`;
+  const fixture = await createUI({ hash: `#magnet=${encodeURIComponent(magnet)}`, addError: 'Queue is busy' });
+  fixture.setAddError(null);
+  await fixture.element('#retry-magnet').handlers.get('click')();
+  assert.equal(fixture.requests.filter(request => request.method === 'POST').length, 2);
+  assert.equal(fixture.element('#retry-magnet').hidden, true);
+  assert.equal(fixture.element('#message').textContent, 'Download added.');
+  const duplicate = await createUI({
+    hash: `#magnet=${encodeURIComponent(magnet)}`, addError: 'This torrent is already in your queue.', addStatus: 409
+  });
+  assert.equal(duplicate.element('#message').classList.contains('info'), true);
+  assert.match(duplicate.element('#message').textContent, /already in your queue/);
+  assert.equal(duplicate.element('#retry-magnet').hidden, true);
+  assert.equal(duplicate.requests.filter(request => request.method === 'POST').length, 1);
+});
+
+test('concurrent refreshes share one request and focus recovers a restarted client session', async () => {
+  const fixture = await createUI();
+  let finish;
+  const before = fixture.requests.length;
+  fixture.setResponseHandler(() => new Promise(resolve => { finish = resolve; }));
+  const first = vm.runInContext('refresh()', fixture.context);
+  const second = vm.runInContext('refresh()', fixture.context);
+  assert.equal(first, second);
+  assert.equal(fixture.requests.length, before + 1);
+  finish({ ok: true, json: async () => fixture.data });
+  await first;
+  fixture.setResponseHandler(undefined);
+  fixture.data.token = 'restarted-session';
+  await fixture.windowHandlers.get('focus')();
+  assert.equal(vm.runInContext('token', fixture.context), 'restarted-session');
+  assert.equal(fixture.element('#reconnect').disabled, false);
+});
+
+test('polling cannot re-enable pending actions and completion restores only valid controls', async () => {
+  const fixture = await createUI();
+  const torrent = { id: 'busy', name: 'Busy download', paused: false, status: 'Downloading',
+    progress: 0, length: 0, downloaded: 0, downloadSpeed: 0, uploadSpeed: 0, peers: 0, path: '/downloads' };
+  fixture.data.torrents = [torrent];
+  fixture.context.state = fixture.data;
+  vm.runInContext('render(state)', fixture.context);
+  const row = vm.runInContext("rows.get('busy')", fixture.context);
+  const toggle = row.querySelector('.toggle');
+  toggle.closest = () => row;
+  const event = { target: { closest: () => toggle } };
+  let finish;
+  fixture.setResponseHandler((url, options) => options.method === 'POST' ?
+    new Promise(resolve => { finish = resolve; }) : { ok: true, json: async () => fixture.data });
+  const action = fixture.element('#torrents').handlers.get('click')(event);
+  assert.equal(toggle.disabled, true);
+  vm.runInContext('render(state)', fixture.context);
+  assert.equal(toggle.disabled, true);
+  assert.equal(row.querySelector('.remove').disabled, true);
+  await fixture.element('#torrents').handlers.get('click')(event);
+  assert.equal(fixture.requests.filter(request => request.method === 'POST').length, 1);
+  Object.assign(torrent, { paused: true, pendingMove: true });
+  finish({ ok: true, json: async () => torrent });
+  await action;
+  assert.equal(toggle.disabled, false);
+  assert.equal(toggle.textContent, 'Retry move');
+  assert.equal(row.querySelector('.remove').disabled, true);
+  assert.equal(row.attributes['aria-busy'], 'false');
+  fixture.setOffline(true);
+  await vm.runInContext('refresh()', fixture.context);
+  assert.equal(toggle.disabled, true);
+  fixture.setOffline(false);
+  await fixture.element('#reconnect').handlers.get('click')();
+  assert.equal(toggle.disabled, false);
+  assert.equal(row.querySelector('.remove').disabled, true);
+});
+
+test('a mutation waits out an older poll and then requests fresh state', async () => {
+  const fixture = await createUI();
+  const torrent = { id: 'pause', name: 'Pause download', paused: false, status: 'Downloading',
+    progress: 0, length: 0, downloaded: 0, downloadSpeed: 0, uploadSpeed: 0, peers: 0, path: '/downloads' };
+  fixture.data.torrents = [torrent];
+  fixture.context.state = fixture.data;
+  vm.runInContext('render(state)', fixture.context);
+  const row = vm.runInContext("rows.get('pause')", fixture.context);
+  const toggle = row.querySelector('.toggle');
+  toggle.closest = () => row;
+  let releasePoll;
+  let gets = 0;
+  fixture.setResponseHandler((url, options) => {
+    if (options.method === 'POST') {
+      fixture.data.torrents = [{ ...torrent, paused: true, status: 'Paused' }];
+      return { ok: true, json: async () => fixture.data.torrents[0] };
+    }
+    gets++;
+    if (gets === 1) return new Promise(resolve => { releasePoll = resolve; });
+    return { ok: true, json: async () => fixture.data };
+  });
+  const oldPoll = vm.runInContext('refresh()', fixture.context);
+  const action = fixture.element('#torrents').handlers.get('click')({ target: { closest: () => toggle } });
+  releasePoll({ ok: true, json: async () => ({ ...fixture.data, torrents: [torrent] }) });
+  await oldPoll;
+  await action;
+  assert.equal(gets, 2);
+  assert.equal(toggle.textContent, 'Resume');
+  assert.equal(toggle.disabled, false);
 });
