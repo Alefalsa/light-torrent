@@ -1,0 +1,9 @@
+node_modules/
+data/
+downloads/
+.DS_Store
+.env
+.env.*
+!.env.example
+*.log
+coverage/

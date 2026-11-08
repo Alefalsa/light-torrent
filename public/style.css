@@ -1,0 +1,75 @@
+* { box-sizing: border-box; }
+:root { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; color: #263c38; background: #f7f9f8; font-synthesis: none; }
+body { margin: 0; }
+main { max-width: 1032px; margin: 0 auto; padding: 46px 32px; }
+header, .brand, .queue-heading, .torrent-heading, .torrent-details, footer { display: flex; align-items: center; }
+header { justify-content: space-between; margin-bottom: 42px; }
+.brand { gap: 14px; }
+.logo { display: grid; place-items: center; width: 47px; height: 47px; border-radius: 15px; background: #287f68; color: white; font-size: 31px; }
+h1 { font-size: 23px; letter-spacing: -.7px; margin: 0 0 5px; }
+p { margin: 0; }
+.brand p, .queue-heading > span, footer { color: #72817c; font-size: 13px; }
+.connection { border: 1px solid #d9e7de; border-radius: 24px; padding: 8px 13px; font-size: 12px; background: #eef5f0; color: #37836a; }
+.connection::before { content: ""; display: inline-block; width: 6px; height: 6px; border-radius: 50%; background: currentColor; margin-right: 7px; }
+.connection.offline { color: #ad493f; background: #fff2ef; border-color: #f3d6cd; }
+.connection.sleeping { color: #72817c; background: #eef1ef; border-color: #dfe5e1; }
+.idle-note { margin-top: 15px; color: #72817c; font-size: 12px; }
+h2 { font-size: 25px; font-weight: 600; letter-spacing: -.7px; margin: 12px 0 24px; }
+button { font: inherit; font-size: 13px; font-weight: 600; background: #287f68; color: white; border: 0; border-radius: 10px; padding: 14px 20px; cursor: pointer; }
+button:hover { background: #206953; }
+button:disabled { opacity: .5; cursor: wait; }
+:focus-visible { outline: 3px solid #70b49b; outline-offset: 3px; }
+.stats { display: grid; grid-template-columns: repeat(3, 1fr); margin: 28px 0 38px; border: 1px solid #e4eae6; background: white; border-radius: 14px; padding: 23px 0; }
+.stats div { padding: 0 27px; border-right: 1px solid #e8ede9; }
+.stats div:last-child { border: 0; }
+.stats span { display: block; font-size: 10px; letter-spacing: 1.3px; color: #83918a; margin-bottom: 10px; }
+.stats strong { font-size: 24px; font-weight: 500; letter-spacing: -.7px; font-variant-numeric: tabular-nums; }
+.queue-heading { justify-content: space-between; margin-bottom: 18px; }
+.queue-heading h2 { font-size: 18px; margin: 0; }
+#total-count { font-size: 11px; padding: 3px 7px; background: #e8eeea; color: #687e70; border-radius: 5px; margin-left: 8px; }
+.empty { text-align: center; padding: 50px 12px 60px; border: 1px dashed #d9e3dc; border-radius: 14px; }
+.empty-icon { display: grid; place-items: center; width: 55px; height: 55px; margin: auto; border-radius: 18px; background: #edf2ee; color: #6a9280; font-size: 29px; }
+.empty h3 { margin: 18px 0 10px; font-size: 16px; font-weight: 500; }
+.empty p { color: #8a978f; font-size: 13px; }
+.torrent { display: flex; align-items: center; gap: 18px; padding: 23px; background: white; border: 1px solid #e4eae6; border-radius: 14px; margin-bottom: 12px; }
+.torrent-icon { display: grid; place-items: center; align-self: flex-start; width: 40px; height: 46px; flex-shrink: 0; border-radius: 10px; background: #edf4ef; color: #44866d; font-size: 23px; }
+.torrent-content { min-width: 0; flex: 1; }
+.torrent-heading { gap: 10px; justify-content: space-between; margin-bottom: 13px; }
+.torrent h3 { overflow-wrap: anywhere; font-size: 14px; font-weight: 600; margin: 0; }
+.status { flex-shrink: 0; color: #38886a; font-size: 11px; }
+progress { width: 100%; height: 5px; display: block; border: 0; border-radius: 8px; overflow: hidden; background: #eaf0ec; accent-color: #65a588; }
+progress::-webkit-progress-bar { background: #eaf0ec; }
+progress::-webkit-progress-value { background: #65a588; border-radius: 8px; }
+progress::-moz-progress-bar { background: #65a588; }
+.torrent-details { flex-wrap: wrap; gap: 14px; margin-top: 10px; font-size: 11px; color: #7f9086; font-variant-numeric: tabular-nums; }
+.actions { display: flex; gap: 6px; }
+.secondary { padding: 9px 12px; background: #f1f5f2; color: #5e7668; font-size: 11px; }
+.secondary:hover { background: #e4ece6; }
+.remove { background: transparent; color: #8e9892; }
+.torrent-error { color: #af5145; font-size: 12px; margin-top: 10px; overflow-wrap: anywhere; }
+.torrent-warning { display: inline-flex; position: relative; margin-top: 10px; }
+.warning-trigger { display: inline-flex; align-items: center; gap: 6px; padding: 3px 0; background: transparent; color: #886519; font-size: 12px; font-weight: 500; }
+.warning-trigger:hover { background: transparent; color: #674c10; }
+.warning-trigger span { margin: 0; font-size: inherit; }
+.warning-trigger .warning-icon { font-size: 16px; }
+.warning-tooltip { position: absolute; left: 0; top: 100%; z-index: 1; width: min(340px, calc(100vw - 80px)); padding: 13px; background: #fff9e9; border: 1px solid #eaddb5; border-radius: 8px; box-shadow: 0 5px 16px #263c381a; color: #705a2e; font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; visibility: hidden; opacity: 0; }
+.torrent-warning:not([data-dismissed]):hover .warning-tooltip, .torrent-warning:not([data-dismissed]):focus-within .warning-tooltip { visibility: visible; opacity: 1; }
+.warning-details { display: block; margin-top: 8px; color: #877b63; font-size: 11px; }
+details { margin-top: 10px; font-size: 11px; color: #819188; }
+summary { cursor: pointer; }
+details code { display: block; margin-top: 8px; overflow-wrap: anywhere; }
+footer { gap: 7px; flex-wrap: wrap; margin-top: 25px; font-size: 10px; }
+footer code { overflow-wrap: anywhere; font: inherit; }
+.folder-icon { font-size: 20px; }
+.footer-note { margin-left: auto; }
+.message { background: #fff0ea; color: #a2493e; border: 1px solid #efcfc3; border-radius: 10px; padding: 13px 16px; margin-top: 15px; font-size: 13px; overflow-wrap: anywhere; }
+.message.info { background: #edf5ef; color: #287f68; border-color: #d4e5d9; }
+.warning { background: #fff9e9; border-color: #eaddb5; color: #8a713b; }
+[hidden] { display: none !important; }
+@media (max-width: 660px) {
+  main { padding: 25px 16px; } header { margin-bottom: 28px; } .brand p { font-size: 11px; }
+  .stats div { padding: 0 14px; } .stats strong { font-size: 20px; }
+  .stats span { font-size: 8px; letter-spacing: .5px; } .queue-heading > span { font-size: 11px; }
+  .torrent { flex-wrap: wrap; padding: 17px; gap: 12px; } .torrent-icon { display: none; }
+  .torrent-content { flex-basis: 100%; } .actions { margin-left: auto; } .footer-note { margin-left: 0; }
+}

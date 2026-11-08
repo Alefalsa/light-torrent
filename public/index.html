@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="color-scheme" content="light">
+  <meta name="theme-color" content="#287f68">
+  <meta name="description" content="A lightweight, local-first torrent client for magnet links. Track downloads, pause and resume, and keep your files on your computer.">
+  <title>Light Torrent</title>
+  <link rel="icon" href="/favicon.svg" type="image/svg+xml">
+  <link rel="stylesheet" href="/style.css">
+  <script src="/app.js" defer></script>
+</head>
+<body>
+  <main>
+    <header>
+      <div class="brand"><span class="logo" aria-hidden="true">↧</span><div><h1>Light Torrent</h1><p>Less clutter. More downloading.</p></div></div>
+      <span class="connection" id="connection" role="status">Connecting</span>
+    </header>
+    <div class="message" id="message" role="alert" hidden></div>
+    <div class="message warning" id="engine-error" role="status" hidden></div>
+    <p class="idle-note" id="idle-note" role="status" hidden></p>
+    <section class="stats" aria-label="Transfer totals">
+      <div><span>DOWNLOAD SPEED</span><strong id="download-speed">0 B/s</strong></div>
+      <div><span>UPLOAD SPEED</span><strong id="upload-speed">0 B/s</strong></div>
+      <div><span>ACTIVE TORRENTS</span><strong id="active-count">0</strong></div>
+    </section>
+    <section aria-labelledby="queue-title">
+      <div class="queue-heading"><h2 id="queue-title">Your downloads <span id="total-count">0</span></h2><span>Saved automatically</span></div>
+      <div id="torrents"></div>
+      <div id="empty" class="empty"><div class="empty-icon" aria-hidden="true">↓</div><h3>A little space for something good.</h3><p>Approve a magnet link in the browser extension to get started.</p></div>
+    </section>
+    <footer><span class="folder-icon" aria-hidden="true">▱</span><span>Saving to <code id="download-dir">...</code></span><span class="footer-note">Only download content you have permission to share.</span></footer>
+  </main>
+  <template id="torrent-template">
+    <article class="torrent">
+      <div class="torrent-icon" aria-hidden="true">↓</div>
+      <div class="torrent-content">
+        <div class="torrent-heading"><h3></h3><span class="status"></span></div>
+        <progress max="1" value="0" aria-label="Download progress"></progress>
+        <div class="torrent-details"><span class="size"></span><span class="speed"></span><span class="peers"></span></div>
+        <p class="torrent-error" hidden></p>
+        <div class="torrent-warning" hidden>
+          <button class="warning-trigger" type="button"><span class="warning-icon" aria-hidden="true">⚠</span><span class="warning-label">Torrent warning</span></button>
+          <div class="warning-tooltip" role="tooltip"><span class="warning-explanation"></span><span class="warning-details"></span></div>
+        </div>
+        <details><summary>File location</summary><code class="file-path"></code></details>
+      </div>
+      <div class="actions"><button class="toggle secondary" type="button">Pause</button><button class="remove secondary" type="button">Remove</button></div>
+    </article>
+  </template>
+</body>
+</html>

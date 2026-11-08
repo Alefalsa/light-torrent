@@ -1,0 +1,22 @@
+{
+  "name": "light-torrent",
+  "version": "1.0.0",
+  "private": true,
+  "license": "MIT",
+  "type": "module",
+  "description": "A lightweight, local-first torrent client for extension-approved magnet links",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "install:helper": "node native/install.js",
+    "test": "node --test",
+    "check": "node --check server.js && node --check lib/queue.js && node --check public/app.js && node --check extension/shared.js && node --check extension/content.js && node --check extension/shadow-roots.js && node --check extension/background.js && node --check native/launcher.js && node --check native/host.js && node --check native/install.js"
+  },
+  "dependencies": {
+    "parse-torrent": "^11.0.24",
+    "proper-lockfile": "^4.1.2",
+    "webtorrent": "^3.0.21"
+  }
+}
