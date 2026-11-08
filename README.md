@@ -6,20 +6,42 @@ account, cloud service, Electron shell, or separate torrent daemon.
 
 ## Run
 
-Requires **Node.js 22 or newer**.
+The browser-extension workflow requires **macOS**, **Node.js 22 or newer**,
+and **Chrome, Chromium, Edge, or Brave** (Chromium 111 or newer). Firefox and
+Safari are not supported. The Node.js client can run on other platforms, but
+the native helper installer and current extension download flow support macOS
+only.
+
+Install a current Node.js LTS release from [nodejs.org](https://nodejs.org/en/download),
+then reopen your terminal and check `node --version` and `npm --version`.
 
 ```sh
 git clone https://github.com/Alefalsa/light-torrent.git
 cd light-torrent
 npm ci
+```
+
+If you already have the source, run `npm ci` from its directory.
+
+Next, follow the [extension installation guide](extension/README.md#install):
+enable Developer mode, load the `extension` directory, and install the native
+helper for its extension ID. **Both the extension and helper are required for
+the browser workflow, even if the client is already running.**
+
+Approve a magnet link on a website. The helper starts the client automatically
+and opens **http://127.0.0.1:3000**, where the download appears in the queue.
+The dashboard has no manual input or `.torrent` upload panel. The extension
+itself has no npm dependencies or separate build step; `npm ci` installs the
+local client's dependencies.
+
+For manual startup or debugging, run this from the project directory:
+
+```sh
 npm start
 ```
 
-If you already have the source, run `npm ci` and `npm start` from its directory.
-
-Open **http://127.0.0.1:3000** to view your downloads. Install the browser extension
-below and approve a magnet link on a website to add it directly to the queue.
-The dashboard has no manual input or `.torrent` upload panel.
+Keep that terminal open while the client runs. Manual startup does not replace
+the extension's native-helper installation.
 
 - Live progress, download/upload speeds, and peer counts.
 - Pause stops the torrent's connections, including uploads; resume verifies and
@@ -122,17 +144,20 @@ remote-access server and should not be exposed through a reverse proxy.
 
 ## Browser extension
 
-The optional [Chromium extension](extension/README.md) recognizes clicked magnet
-links on websites. It asks for confirmation, opens the local client with the
-link in its URL fragment. The client adds the magnet directly after extension
+The [Chromium extension](extension/README.md) is the normal way to add downloads.
+It recognizes clicked magnet links on websites, asks for confirmation, and
+opens the local client with the link in its URL fragment.
+The client adds the magnet directly after extension
 approval; there is no second confirmation on the dashboard.
-Install the `extension` directory through your browser's **Load unpacked** option.
-On macOS, install the native-messaging helper using the instructions linked above
-to start the client automatically after approval. It reuses a running client on
-port 3000. No additional npm
-dependencies are needed; the extension requires the `nativeMessaging` permission.
+Install the `extension` directory through your browser's **Load unpacked** option,
+then install the macOS native-messaging helper using the guide linked above.
+The extension always calls the helper before opening a client tab, including
+when reusing a running client on port 3000. There is no helper-free fallback.
 After updating the source, reload the extension and website tabs to apply new
 icons, highlighting, and confirmation behavior.
+
+For installation, permissions, startup, and download issues, see
+[extension troubleshooting](extension/README.md#troubleshooting).
 
 ## Development
 
