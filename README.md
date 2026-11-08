@@ -170,6 +170,8 @@ For installation, permissions, startup, and download issues, see
 
 Runtime queue data, downloads, dependencies, local environment files, and logs
 are excluded from Git. The lockfile is committed for reproducible installation.
+After changing dependencies, verify `npm ci` in a clean checkout: an existing
+`node_modules` directory can mask missing optional-dependency lockfile entries.
 Configuration uses environment variables; the app does not load `.env` files.
 The API retains `.torrent` source parsing for saved magnet metadata and existing
 API clients, although uploads are no longer offered in the dashboard.
