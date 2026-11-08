@@ -7,11 +7,12 @@ import os from 'node:os';
 import path from 'node:path';
 import http from 'node:http';
 import { setTimeout } from 'node:timers/promises';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import WebTorrent from 'webtorrent';
 import { createApp } from '../server.js';
 import { parseSource } from '../lib/queue.js';
-import { isClientReady } from '../native/launcher.js';
+import { isClientReady, startClient } from '../native/launcher.js';
+import { readCompletedDirectory, saveCompletedDirectory, settingsPath } from '../lib/settings.js';
 
 const offline = {
   dht: false, tracker: false, lsd: false, utPex: false,
@@ -29,6 +30,7 @@ async function waitFor(predicate, timeout = 10000) {
 
 async function setup(t, { idleTimeoutMs = 120000 } = {}) {
   const root = await mkdtemp(path.join(os.tmpdir(), 'light-torrent-test-'));
+  const settingsFile = path.join(root, 'settings.json');
   const apps = [];
   t.after(async () => {
     for (const app of apps) if (!app.closed) await app.close();
@@ -38,7 +40,7 @@ async function setup(t, { idleTimeoutMs = 120000 } = {}) {
     const client = new WebTorrent(offline);
     const app = await createApp({
       client, idleTimeoutMs, dataDir: path.join(root, 'data'), downloadDir: path.join(root, 'downloads'),
-      completedDir: path.join(root, 'finished')
+      completedDir: await readCompletedDirectory(settingsFile) || path.join(root, 'finished'), settingsFile
     });
     const close = app.close;
     app.close = async () => {
@@ -58,7 +60,7 @@ async function setup(t, { idleTimeoutMs = 120000 } = {}) {
     }
     return { app, url, post };
   }
-  return { root, open, ...await open() };
+  return { root, settingsFile, open, ...await open() };
 }
 
 async function completedFixture(t, contents = { 'complete.txt': 'A verified completion fixture.' }, options = {}) {
@@ -148,6 +150,47 @@ test('persists paused queue, rejects duplicates, resumes, and preserves files on
   assert.equal((await reopened.post(`/api/torrents/${id}/pause`)).status, 404);
   const saved = JSON.parse(await readFile(path.join(root, 'data', 'queue.json'), 'utf8'));
   assert.deepEqual(saved.torrents, []);
+});
+
+test('first extension use applies the chosen folder to a running client and completion survives restart', async t => {
+  const fixture = await completedFixture(t);
+  const { app, root, entry, files, settingsFile, url } = fixture;
+  const finalFolder = path.join(root, 'chosen final folder');
+  await mkdir(finalFolder);
+  let prompts = 0;
+  const options = { url, settingsFile, chooseDirectory: async () => { prompts++; return finalFolder; } };
+  assert.deepEqual(await startClient(options), { started: false });
+  assert.equal(app.queue.completedDir, finalFolder);
+  assert.deepEqual(await startClient(options), { started: false });
+  assert.equal(prompts, 1);
+  await app.queue.scheduleCompletion(entry, files);
+  assert.equal(entry.completedDirectory, finalFolder);
+  assert.equal(await readFile(path.join(finalFolder, 'complete.txt'), 'utf8'), 'A verified completion fixture.');
+  await app.close();
+  const reopened = await fixture.open();
+  assert.equal(reopened.app.queue.completedDir, finalFolder);
+  assert.equal(reopened.app.queue.snapshot().torrents[0].path, finalFolder);
+});
+
+test('folder settings reload is protected and never applies unselected or invalid folders', async t => {
+  const { app, root, settingsFile, url, post } = await setup(t);
+  const initial = await (await fetch(url + '/api/settings')).json();
+  assert.equal(initial.completedDir, path.join(root, 'finished'));
+  assert.match(initial.token, /^[a-f0-9]{64}$/);
+  assert.equal((await post('/api/settings', {}, { 'X-Client-Token': '' })).status, 403);
+  assert.equal((await post('/api/settings', {}, { Origin: 'https://example.com' })).status, 403);
+  assert.equal((await post('/api/settings')).status, 400);
+  assert.equal((await post('/api/settings', { completedDir: root })).status, 400);
+  await writeFile(settingsFile, 'invalid settings');
+  assert.equal((await post('/api/settings')).status, 500);
+  assert.equal(app.queue.completedDir, initial.completedDir);
+  const finalFolder = path.join(root, 'selected');
+  await mkdir(finalFolder);
+  await saveCompletedDirectory(finalFolder, settingsFile);
+  const changed = await post('/api/settings');
+  assert.equal(changed.status, 200);
+  assert.deepEqual(changed.body, { completedDir: finalFolder });
+  assert.equal(app.queue.completedDir, finalFolder);
 });
 
 test('concurrent duplicate additions create exactly one queue entry', async t => {
@@ -343,15 +386,19 @@ test('standalone exits after idle or signal cleanup despite lingering handles, a
     await rm(root, { recursive: true, force: true });
   });
   const serverPath = fileURLToPath(new URL('../server.js', import.meta.url));
+  const finalFolder = path.join(root, 'chosen final folder');
+  await mkdir(finalFolder);
   for (const trigger of ['idle', 'SIGTERM', 'SIGINT', 'save-failure', 'startup-failure']) {
     const directory = path.join(root, trigger);
     const dataDir = path.join(directory, 'data');
     await mkdir(dataDir, { recursive: true });
     const initial = JSON.stringify({ version: 2, torrents: [], files: {} });
     await writeFile(path.join(dataDir, 'queue.json'), initial);
+    await saveCompletedDirectory(finalFolder, settingsPath({ home: directory, localAppData: directory }));
     const preload = path.join(directory, 'linger.mjs');
     await writeFile(preload, `
       setInterval(() => {}, 1000);
+      ${process.platform === 'win32' ? "process.on('message', signal => process.emit(signal));" : ''}
       ${trigger === 'idle' ? `
         const original = globalThis.setTimeout;
         globalThis.setTimeout = (callback, delay, ...args) =>
@@ -365,10 +412,13 @@ test('standalone exits after idle or signal cleanup despite lingering handles, a
     let stdout = '';
     let stderr = '';
     let spawnError;
-    const child = spawn(process.execPath, ['--import', preload, serverPath], {
-      env: { ...process.env, PORT: trigger === 'startup-failure' ? 'invalid' : String(port),
-        DATA_DIR: dataDir, DOWNLOAD_DIR: path.join(directory, 'downloads') },
-      stdio: ['ignore', 'pipe', 'pipe']
+    const env = { ...process.env, PORT: trigger === 'startup-failure' ? 'invalid' : String(port),
+      DATA_DIR: dataDir, DOWNLOAD_DIR: path.join(directory, 'downloads'),
+      HOME: directory, USERPROFILE: directory, LOCALAPPDATA: directory };
+    delete env.COMPLETED_DIR;
+    const child = spawn(process.execPath, ['--import', pathToFileURL(preload).href, serverPath], {
+      env,
+      stdio: process.platform === 'win32' ? ['ignore', 'pipe', 'pipe', 'ipc'] : ['ignore', 'pipe', 'pipe']
     });
     child.stdout.on('data', chunk => { stdout += chunk; });
     child.stderr.on('data', chunk => { stderr += chunk; });
@@ -376,11 +426,19 @@ test('standalone exits after idle or signal cleanup despite lingering handles, a
     const completed = new Promise(resolve => child.once('close', (code, signal) => resolve({ code, signal })));
     children.push({ child, completed });
     if (trigger !== 'startup-failure') {
-      await waitFor(() => spawnError || stdout.includes('Light Torrent is ready') || child.exitCode !== null, 5000);
+      await waitFor(() => spawnError ||
+        (stdout.includes('Light Torrent is ready') && stdout.includes('Completed downloads:')) ||
+        child.exitCode !== null, 5000);
       if (spawnError) throw spawnError;
       assert.match(stdout, /Light Torrent is ready/, stderr);
+      assert.ok(stdout.includes(`Completed downloads: ${finalFolder}`), stdout);
       if (trigger === 'save-failure') await rename(dataDir, path.join(directory, 'saved-data'));
-      if (trigger !== 'idle') process.kill(child.pid, trigger === 'save-failure' ? 'SIGTERM' : trigger);
+      if (trigger !== 'idle') {
+        const signal = trigger === 'save-failure' ? 'SIGTERM' : trigger;
+        // Windows process.kill terminates immediately instead of delivering cleanup signals.
+        if (process.platform === 'win32') child.send(signal);
+        else process.kill(child.pid, signal);
+      }
     }
     await waitFor(() => spawnError || child.exitCode !== null || child.signalCode !== null, 5000);
     if (spawnError) throw spawnError;
@@ -398,6 +456,25 @@ test('standalone exits after idle or signal cleanup despite lingering handles, a
       assert.equal((await readdir(dataDir)).includes('queue.lock'), false);
       if (trigger === 'idle') assert.match(stdout, /No active torrents/);
     }
+  }
+});
+
+test('rejects unsupported filenames in every path component before reserving files', async t => {
+  const { app } = await setup(t);
+  const queue = app.queue;
+  const entry = { infoHash: 'a'.repeat(40) };
+  const invalid = ['invalid:directory/child.txt', 'folder/bad?.txt', 'bad|folder/child.txt', 'folder/control\x01.txt'];
+  if (process.platform === 'win32') {
+    invalid.push('NUL', 'folder/CON.txt', 'AUX/child.txt', 'COM1.log', 'lpt9/child.txt',
+      'COM\u00b9.txt', 'CONIN$', 'CONOUT$.txt', 'folder./child.txt', 'folder /child.txt', 'file.txt.', 'file.txt ');
+    assert.equal(queue.fileKey('Folder\\File.txt'), queue.fileKey('folder/file.txt'));
+    for (const valid of ['console.txt', 'COM10.txt', 'LPT0.txt', '.hidden/file.txt']) {
+      assert.ok(queue.filePath(valid).startsWith(queue.downloadDir));
+    }
+  }
+  for (const file of invalid) {
+    assert.throws(() => queue.prepareFiles(entry, [{ path: file }]), /unsupported file path/, file);
+    assert.equal(queue.fileOwners.size, 0);
   }
 });
 
@@ -631,7 +708,8 @@ test('destination symbolic links are not overwritten and loss of ownership cance
   const { app, root, entry, files } = await completedFixture(t);
   await mkdir(path.join(root, 'finished'));
   await writeFile(path.join(root, 'foreign.txt'), 'Keep this unrelated file.');
-  await symlink(path.join(root, 'foreign.txt'), path.join(root, 'finished/complete.txt'));
+  await symlink(process.platform === 'win32' ? root : path.join(root, 'foreign.txt'),
+    path.join(root, 'finished', 'complete.txt'), process.platform === 'win32' ? 'junction' : 'file');
   await app.queue.scheduleCompletion(entry, files);
   assert.match(entry.error, /already exists/);
   assert.equal(await readFile(path.join(root, 'foreign.txt'), 'utf8'), 'Keep this unrelated file.');
@@ -693,7 +771,7 @@ test('claims shared paths safely, preserves legacy copies, and never overwrites 
   queue.prepareFiles(entry, files);
   assert.equal(await readFile(path.join(old, files[0].path), 'utf8'), 'another retained copy');
   assert.equal(await readFile(path.join(downloads, files[0].path), 'utf8'), 'retained partial data');
-  await symlink(old, path.join(downloads, 'linked'));
+  await symlink(old, path.join(downloads, 'linked'), process.platform === 'win32' ? 'junction' : 'dir');
   assert.throws(() => queue.prepareFiles(entry, [{ path: 'linked/new.txt' }]), /symbolic link/);
   const save = queue.save;
   queue.save = () => { throw new Error('Ownership save failed'); };

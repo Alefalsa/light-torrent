@@ -7,13 +7,16 @@ const folder = new URL('../extension/', import.meta.url);
 const magnet = `magnet:?xt=urn:btih:${'a'.repeat(40)}&dn=Example%20File`;
 const sender = { id: 'light-torrent-test', tab: { id: 1 }, url: 'https://example.test/' };
 
-async function setup({ approved = true, tabError = null, nativeError = null, nativeResult = { ok: true }, buildDOM = () => ({}) } = {}) {
+async function setup({ approved = true, tabError = null, nativeError = null, nativeResult = { ok: true },
+  deferNative = false, buildDOM = () => ({}) } = {}) {
   const tabs = [];
   const confirmations = [];
   const alerts = [];
   const errors = [];
   const handlers = new Map();
   const nativeRequests = [];
+  const nativeReplies = [];
+  const nativePorts = [];
   const observers = [];
   const rootNotifications = [];
   let onMessage;
@@ -103,11 +106,33 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
       id: sender.id,
       onMessage: { addListener(handler) { onMessage = handler; } },
       sendMessage: message => dispatch(message),
-      async sendNativeMessage(host, request) {
-        assert.equal(tabs.length, 0);
-        nativeRequests.push({ host, request });
-        if (nativeError) throw new Error(nativeError);
-        return nativeResult;
+      connectNative(host) {
+        let messageListener;
+        let disconnectListener;
+        const port = {
+          disconnected: false,
+          onMessage: { addListener(listener) { messageListener = listener; } },
+          onDisconnect: { addListener(listener) { disconnectListener = listener; } },
+          disconnect() { port.disconnected = true; },
+          postMessage(request) {
+            assert.equal(tabs.length, 0);
+            nativeRequests.push({ host, request });
+            const reply = (result = nativeResult) => {
+              if (nativeError) {
+                chrome.runtime.lastError = { message: nativeError };
+                port.disconnected = true;
+                disconnectListener();
+                delete chrome.runtime.lastError;
+              } else {
+                messageListener(result);
+              }
+            };
+            if (deferNative) nativeReplies.push(reply);
+            else queueMicrotask(reply);
+          }
+        };
+        nativePorts.push(port);
+        return port;
       }
     },
     tabs: {
@@ -142,7 +167,8 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
     await handlers.get(type)(event);
     return event;
   }
-  return { context, tabs, confirmations, alerts, errors, nativeRequests, dispatch, click,
+  return { context, tabs, confirmations, alerts, errors, nativeRequests, nativePorts,
+    replyNative(result) { nativeReplies.shift()(result); }, dispatch, click,
     document, Element, observers, rootNotifications, append, notify, built };
 }
 
@@ -293,6 +319,35 @@ test('approval opens only the fixed local client with an encoded fragment', asyn
   assert.equal(fixture.nativeRequests[0].host, 'com.lighttorrent.launcher');
   assert.deepEqual(Object.keys(fixture.nativeRequests[0].request), ['action']);
   assert.equal(fixture.nativeRequests[0].request.action, 'start-client');
+  assert.equal(fixture.nativePorts[0].disconnected, true);
+});
+
+test('concurrent approvals wait on one native port while the folder picker is open', async () => {
+  const fixture = await setup({ deferNative: true });
+  const first = fixture.dispatch({ type: 'open-light-torrent', magnet });
+  const second = fixture.dispatch({ type: 'open-light-torrent', magnet });
+  assert.equal(fixture.nativeRequests.length, 1);
+  assert.equal(fixture.nativePorts[0].disconnected, false);
+  assert.equal(fixture.tabs.length, 0);
+  fixture.replyNative({ ok: true });
+  assert.equal((await first).ok, true);
+  assert.equal((await second).ok, true);
+  assert.equal(fixture.tabs.length, 2);
+  assert.equal(fixture.nativePorts[0].disconnected, true);
+});
+
+test('canceling folder selection opens no tab and the next approval can retry', async () => {
+  const fixture = await setup({ deferNative: true });
+  const canceled = fixture.click();
+  fixture.replyNative({ ok: false, error: 'Folder selection canceled. No download was started.' });
+  await canceled;
+  assert.equal(fixture.tabs.length, 0);
+  assert.match(fixture.alerts[0], /Folder selection canceled/);
+  const retry = fixture.click();
+  fixture.replyNative({ ok: true });
+  await retry;
+  assert.equal(fixture.nativeRequests.length, 2);
+  assert.equal(fixture.tabs.length, 1);
 });
 
 test('synthetic clicks, other links, and right clicks are left alone', async () => {

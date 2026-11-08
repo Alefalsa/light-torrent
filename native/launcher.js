@@ -4,9 +4,20 @@ import os from 'node:os';
 import path from 'node:path';
 import { setTimeout } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { ensureCompletedDirectory, pickCompletedDirectory } from './folders.js';
+import { settingsPath } from '../lib/settings.js';
 
 const projectDir = path.dirname(path.dirname(fileURLToPath(import.meta.url)));
 const clientURL = 'http://127.0.0.1:3000';
+
+export function clientLogPath({
+  platform = process.platform, home = os.homedir(),
+  localAppData = process.env.LOCALAPPDATA || path.join(home, 'AppData', 'Local')
+} = {}) {
+  return platform === 'win32' ?
+    path.join(localAppData, 'Light Torrent', 'Logs', 'client.log') :
+    path.join(home, 'Library', 'Logs', 'Light Torrent', 'client.log');
+}
 
 export async function isClientReady(url = clientURL, opening = false) {
   let response;
@@ -15,7 +26,7 @@ export async function isClientReady(url = clientURL, opening = false) {
       signal: AbortSignal.timeout(1000), redirect: 'error'
     });
   } catch (error) {
-    if (error.cause?.code === 'ECONNREFUSED' || error.name === 'TimeoutError') return false;
+    if (['ECONNREFUSED', 'ECONNRESET'].includes(error.cause?.code) || error.name === 'TimeoutError') return false;
     throw new Error(`Could not check the local client: ${error.message}`, { cause: error });
   }
   let health;
@@ -31,24 +42,57 @@ export async function isClientReady(url = clientURL, opening = false) {
   return response.ok && health.ready === true;
 }
 
+async function getClientSettings(url) {
+  const response = await fetch(`${url}/api/settings`, { signal: AbortSignal.timeout(5000), redirect: 'error' });
+  if (!response.ok) throw new Error('The running client needs to be restarted to support final-folder selection. Pause downloads and let it shut down, then approve the magnet again.');
+  const settings = await response.json();
+  if (typeof settings.completedDir !== 'string' || !/^[a-f0-9]{64}$/.test(settings.token || '')) {
+    throw new Error('The running client returned incompatible folder settings. Restart Light Torrent.');
+  }
+  return settings;
+}
+
+async function applyCompletedDirectory(url, directory, settings) {
+  settings ??= await getClientSettings(url);
+  if (settings.completedDir === directory) return;
+  const response = await fetch(`${url}/api/settings`, {
+    method: 'POST', signal: AbortSignal.timeout(5000), redirect: 'error',
+    headers: { 'Content-Type': 'application/json', 'X-Client-Token': settings.token },
+    body: '{}'
+  });
+  const result = await response.json();
+  if (!response.ok || result.completedDir !== directory) {
+    throw new Error(result.error || 'The running client could not apply the selected final folder.');
+  }
+}
+
 export async function startClient({
   url = clientURL,
   serverPath = path.join(projectDir, 'server.js'),
   cwd = projectDir,
-  logPath = path.join(os.homedir(), 'Library', 'Logs', 'Light Torrent', 'client.log'),
-  timeoutMs = 15000
+  logPath = clientLogPath(),
+  timeoutMs = 15000,
+  settingsFile = settingsPath(),
+  chooseDirectory = pickCompletedDirectory
 } = {}) {
-  if (await isClientReady(url, true)) return { started: false };
+  const ready = await isClientReady(url, true);
+  const runningSettings = ready ? await getClientSettings(url) : undefined;
+  const completedDir = await ensureCompletedDirectory({ settingsFile, chooseDirectory });
+  if (ready) {
+    await applyCompletedDirectory(url, completedDir, runningSettings);
+    return { started: false };
+  }
   mkdirSync(path.dirname(logPath), { recursive: true, mode: 0o700 });
   const log = openSync(logPath, 'a', 0o600);
   let child;
   try {
     child = spawn(process.execPath, [serverPath], {
-      cwd, detached: true,
+      cwd, detached: true, windowsHide: true,
       stdio: ['ignore', log, log],
       env: {
         ...process.env, PORT: new URL(url).port,
-        DATA_DIR: path.join(cwd, 'data'), DOWNLOAD_DIR: path.join(cwd, 'downloads')
+        DATA_DIR: path.join(cwd, 'data'), DOWNLOAD_DIR: path.join(cwd, 'downloads'),
+        COMPLETED_DIR: completedDir
       }
     });
   } finally {
@@ -63,7 +107,10 @@ export async function startClient({
   while (Date.now() < deadline) {
     if (startupError) throw new Error(`Could not launch the client: ${startupError.message}`, { cause: startupError });
     // Concurrent launches can lose the queue lock while another process becomes ready.
-    if (await isClientReady(url, true)) return { started: true };
+    if (await isClientReady(url, true)) {
+      await applyCompletedDirectory(url, completedDir);
+      return { started: true };
+    }
     await setTimeout(200);
   }
   const detail = exitCode === undefined ? '' : ` (process exit ${exitCode})`;

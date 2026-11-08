@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import WebTorrent from 'webtorrent';
 import lockfile from 'proper-lockfile';
 import { InputError, TorrentQueue } from './lib/queue.js';
+import { readCompletedDirectory, settingsPath } from './lib/settings.js';
 
 const rootDir = path.dirname(fileURLToPath(import.meta.url));
 const assets = new Map([
@@ -39,6 +40,7 @@ export async function createApp({
   dataDir = path.join(rootDir, 'data'),
   downloadDir = path.join(rootDir, 'downloads'),
   completedDir = path.join(os.homedir(), 'Downloads'),
+  settingsFile = settingsPath(),
   client,
   idleTimeoutMs = 120000,
   logger = console
@@ -162,6 +164,10 @@ export async function createApp({
         json(ready ? 200 : 503, { app: 'light-torrent', apiVersion: 1, ready });
         return;
       }
+      if (request.method === 'GET' && pathname === '/api/settings') {
+        json(200, { completedDir: queue.completedDir, token });
+        return;
+      }
       if (request.method === 'POST') {
         const supplied = request.headers['x-client-token'];
         if (typeof supplied !== 'string' || supplied.length !== token.length ||
@@ -174,11 +180,22 @@ export async function createApp({
         updateIdleTimer();
         const input = await readJson(request);
         const match = /^\/api\/torrents\/([a-f0-9-]{36})\/(pause|resume|remove)$/.exec(pathname);
-        if (pathname !== '/api/torrents' && !match) throw new InputError('Not found.', 404);
+        if (pathname !== '/api/torrents' && pathname !== '/api/settings' && !match) throw new InputError('Not found.', 404);
         // Serialize queue mutations without letting a failed action block later requests.
-        const operation = mutations.then(() => match ? queue.action(match[1], match[2]) : queue.add(input));
+        const operation = mutations.then(async () => {
+          if (pathname === '/api/settings') {
+            if (!input || typeof input !== 'object' || Array.isArray(input) || Object.keys(input).length) {
+              throw new InputError('Folder settings requests must be an empty object.');
+            }
+            const selected = await readCompletedDirectory(settingsFile);
+            if (!selected) throw new InputError('Choose a final download folder through the extension first.');
+            queue.completedDir = selected;
+            return { completedDir: selected };
+          }
+          return match ? queue.action(match[1], match[2]) : queue.add(input);
+        });
         mutations = operation.catch(error => logger.error(`Torrent action failed: ${error.message}`));
-        json(match ? 200 : 201, await operation);
+        json(match || pathname === '/api/settings' ? 200 : 201, await operation);
         return;
       }
       throw new InputError('Not found.', 404);
@@ -233,7 +250,7 @@ async function main() {
   const app = await createApp({
     downloadDir: process.env.DOWNLOAD_DIR ? path.resolve(process.env.DOWNLOAD_DIR) : undefined,
     dataDir: process.env.DATA_DIR ? path.resolve(process.env.DATA_DIR) : undefined,
-    completedDir: process.env.COMPLETED_DIR ? path.resolve(process.env.COMPLETED_DIR) : undefined
+    completedDir: process.env.COMPLETED_DIR ? path.resolve(process.env.COMPLETED_DIR) : await readCompletedDirectory()
   });
   try {
     await new Promise((resolve, reject) => {

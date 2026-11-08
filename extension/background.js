@@ -1,13 +1,25 @@
 importScripts('shared.js');
 
+let clientStartup;
+
 async function ensureClientRunning() {
-  let result;
-  try {
-    result = await chrome.runtime.sendNativeMessage('com.lighttorrent.launcher', { action: 'start-client' });
-  } catch (error) {
-    throw new Error(`Client auto-start is unavailable: ${error.message}. Install the native helper and reload the extension.`, { cause: error });
+  if (!clientStartup) {
+    // A native port keeps the service worker alive while the user chooses a folder.
+    clientStartup = new Promise((resolve, reject) => {
+      const port = chrome.runtime.connectNative('com.lighttorrent.launcher');
+      port.onMessage.addListener(result => {
+        if (!result?.ok) reject(new Error(result?.error || 'The native helper did not confirm that the client is ready.'));
+        else resolve();
+        port.disconnect();
+      });
+      port.onDisconnect.addListener(() => {
+        const error = chrome.runtime.lastError;
+        reject(new Error(`Client auto-start is unavailable: ${error?.message || 'The native helper disconnected before confirming readiness'}. Install the native helper and reload the extension.`));
+      });
+      port.postMessage({ action: 'start-client' });
+    }).finally(() => { clientStartup = undefined; });
   }
-  if (!result?.ok) throw new Error(result?.error || 'The native helper did not confirm that the client is ready.');
+  return clientStartup;
 }
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {

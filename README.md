@@ -6,11 +6,10 @@ account, cloud service, Electron shell, or separate torrent daemon.
 
 ## Run
 
-The browser-extension workflow requires **macOS**, **Node.js 22 or newer**,
+The browser-extension workflow requires **Windows or macOS**, **Node.js 22 or newer**,
 and **Chrome, Chromium, Edge, or Brave** (Chromium 111 or newer). Firefox and
 Safari are not supported. The Node.js client can run on other platforms, but
-the native helper installer and current extension download flow support macOS
-only.
+the native helper installer and extension auto-start support Windows and macOS.
 
 Install a current Node.js LTS release from [nodejs.org](https://nodejs.org/en/download),
 then reopen your terminal and check `node --version` and `npm --version`.
@@ -22,13 +21,20 @@ npm ci
 ```
 
 If you already have the source, run `npm ci` from its directory.
+On Windows, use PowerShell or Command Prompt. If PowerShell blocks `npm.ps1`,
+use `npm.cmd` instead of `npm` in the commands below; no execution-policy change
+is required.
 
 Next, follow the [extension installation guide](extension/README.md#install):
 enable Developer mode, load the `extension` directory, and install the native
 helper for its extension ID. **Both the extension and helper are required for
 the browser workflow, even if the client is already running.**
 
-Approve a magnet link on a website. The helper starts the client automatically
+Approve a magnet link on a website. On the first approved link, a native folder
+picker asks where completed downloads should go. Choose your actual Downloads
+folder or another destination; the choice is saved for future downloads.
+Canceling does not start the client or add the magnet and lets you choose again
+on the next approval. The helper then starts the client automatically
 and opens **http://127.0.0.1:3000**, where the download appears in the queue.
 The dashboard has no manual input or `.torrent` upload panel. The extension
 itself has no npm dependencies or separate build step; `npm ci` installs the
@@ -48,7 +54,7 @@ the extension's native-helper installation.
   reuses existing data.
 - Remove clears the queue entry **without deleting downloaded files**.
 - The queue survives restarts, including paused state and received metadata.
-- Once verified complete, torrents stop seeding and move to **`~/Downloads`**.
+- Once verified complete, torrents stop seeding and move to your **chosen final folder**.
   The queue shows **Completed** and the new file location. Completed entries do
   not resume seeding after restart; removing them does not delete their files.
 - Stop with **Ctrl+C** to save progress and close connections cleanly.
@@ -63,7 +69,7 @@ the extension's native-helper installation.
   and lock release, even if a dependency leaves background handles alive.
 
 Unfinished files are saved directly in the app's `downloads/`, without
-client-generated UUID folders. Completed files move into your main Downloads
+client-generated UUID folders. Completed files move into your chosen final
 folder. Multi-file torrents retain their own directory structure. Pause/resume
 verifies and reuses unfinished data instead of creating another folder.
 Staging-file ownership is retained with the queue to prevent a different
@@ -105,13 +111,33 @@ saved when possible.
 
 Optional configuration:
 
+macOS / POSIX shell:
+
 ```sh
 PORT=3001 DOWNLOAD_DIR="$HOME/Downloads/LightTorrent" npm start
 ```
 
-`DOWNLOAD_DIR` selects unfinished-file storage; `COMPLETED_DIR` selects the
-completed-file destination (default `$HOME/Downloads`). If both are the same,
+Windows PowerShell:
+
+```powershell
+$env:PORT = "3001"
+$env:DOWNLOAD_DIR = "$env:USERPROFILE\Downloads\LightTorrent"
+npm.cmd start
+```
+
+`DOWNLOAD_DIR` selects unfinished-file storage. Manual startup uses the saved
+final folder, or your home directory's `Downloads` folder if you have not chosen
+one yet; `COMPLETED_DIR` can override it for manual startup. Extension handoffs
+always apply the saved folder choice, including to an already-running client.
+If unfinished and completed directories are the same,
 the torrent simply stops and is marked Completed without moving files.
+
+The folder preference is stored in `%LOCALAPPDATA%\Light Torrent\settings.json`
+on Windows or `~/Library/Application Support/Light Torrent/settings.json`
+on macOS. To choose again, remove only this settings file, then approve another
+magnet. Missing, inaccessible, or invalid saved folders produce an error rather
+than silently falling back to a different destination. Already-completed files
+are not relocated, and moves already in progress retain their recorded destination.
 
 `DATA_DIR` can also select a different queue directory. Relative paths are resolved
 from the current working directory. The web interface binds only to IPv4 loopback,
@@ -134,6 +160,9 @@ remote-access server and should not be exposed through a reverse proxy.
   Firewall/NAT restrictions may limit peer availability.
 - No file preview, selective downloading, browser file serving, or automatic
   opening of downloaded content. Open downloads from your file manager.
+- Windows filenames with reserved device names (such as `CON` or `NUL`),
+  trailing dots/spaces, or unsupported characters are rejected with an error,
+  not silently renamed. This also applies to directory components.
 - Only download and share content you have permission to use. Downloaded files
   are untrusted; don't execute them without checking them.
 - `npm audit` currently reports a high-severity advisory in WebTorrent's transitive
@@ -150,7 +179,7 @@ opens the local client with the link in its URL fragment.
 The client adds the magnet directly after extension
 approval; there is no second confirmation on the dashboard.
 Install the `extension` directory through your browser's **Load unpacked** option,
-then install the macOS native-messaging helper using the guide linked above.
+then install the Windows or macOS native-messaging helper using the guide linked above.
 The extension always calls the helper before opening a client tab, including
 when reusing a running client on port 3000. There is no helper-free fallback.
 After updating the source, reload the extension and website tabs to apply new
@@ -165,7 +194,7 @@ For installation, permissions, startup, and download issues, see
 - `lib/queue.js`: validation, persistence, engine lifecycle, and completion moves.
 - `public/`: dashboard HTML, CSS, JavaScript, and SVG favicon.
 - `extension/`: magnet highlighting, approval, and client handoff.
-- `native/`: macOS native-messaging installer and client launcher.
+- `native/`: Windows/macOS native-messaging installer, folder picker, and client launcher.
 - `test/`: isolated regression tests using temporary storage and local peers.
 
 Runtime queue data, downloads, dependencies, local environment files, and logs
@@ -187,7 +216,7 @@ Tests use temporary directories and local peers, without downloading public
 torrents. They cover HTTP protections, queue persistence, pause/resume/removal,
 invalid input, failed persistence, single-instance locking, and a real local
 magnet download.
-GitHub Actions runs syntax checks and the full test suite on Linux and macOS
+GitHub Actions runs syntax checks and the full test suite on Linux, macOS, and Windows
 with Node.js 22 and 24.
 
 ## License
