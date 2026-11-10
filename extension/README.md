@@ -1,8 +1,10 @@
 # Light Torrent Magnet Links
 
-A dependency-free Manifest V3 extension for Chrome, Chromium, Edge, and Brave.
+A dependency-free Manifest V3 extension for Chrome, Chromium, Edge, Brave,
+and Safari on macOS.
 It is a companion to the local client, not a torrent engine inside the browser.
 Requires Chromium 111 or newer for the open-shadow-root notification hook.
+Safari requires version 18.4 or newer and full Xcode for its local app build.
 
 ## Requirements
 
@@ -15,16 +17,19 @@ Requires Chromium 111 or newer for the open-shadow-root notification hook.
   npm --version
   ```
 
-- **Chrome, Chromium, Edge, or Brave**. Firefox and Safari are not supported.
+- **Chrome, Chromium, Edge, Brave, or macOS Safari 18.4+**. Firefox is not supported.
 - The local client's dependencies, installed below.
 
-The extension itself needs no npm packages, bundler, or build command. It is
-loaded directly from source. **The extension and native helper are both required
+The extension itself needs no npm packages or bundler. Chromium loads it directly
+from source; Safari builds a macOS app with Xcode. **The extension and native helper are both required
 for the browser download flow**, even when the local client is already running.
 The extension always contacts the helper before opening the dashboard; there
 is no helper-free startup fallback; Linux native-helper installation is not supported.
 
 ## Install
+
+Safari users should follow [Safari on macOS](#safari-on-macos) instead.
+The steps below are for Chromium browsers.
 
 1. Download the source and install the local client's dependencies:
 
@@ -78,6 +83,77 @@ is no helper-free startup fallback; Linux native-helper installation is not supp
 For manual client startup or debugging, use `npm start` from the project root
 and keep the terminal open. The native helper is still required for extension
 handoffs.
+
+### Safari on macOS
+
+1. Install **Node.js 22+**, the project's dependencies (`npm ci` from the project
+   root), and full **Xcode** from the Mac App Store. Open Xcode once to complete
+   its setup. If `xcrun --find safari-web-extension-converter` fails, select Xcode:
+
+   ```sh
+   sudo xcode-select --switch /Applications/Xcode.app/Contents/Developer
+   ```
+
+2. From the project root, run:
+
+   ```sh
+   npm run install:safari
+   ```
+
+   This builds and locally signs `~/Applications/Light Torrent Safari.app`,
+   registers its Safari extension, and installs the per-user on-demand launch
+   agent `~/Library/LaunchAgents/com.lighttorrent.safari.launcher.plist`.
+   It also checks native messaging without starting the torrent client or
+   changing your folder preference. No administrator privileges or paid Apple
+   Developer account are required for this local build.
+
+3. Open **Light Torrent Safari** from your Applications folder. In **Safari >
+   Settings > Advanced**, enable **Show features for web developers**. In the
+   **Developer** tab, enable **Allow unsigned extensions** and complete any macOS
+   authentication prompt yourself. On older Safari versions the setting is in
+   the Develop menu. **Safari resets this option when it quits**; enable it
+   again after each restart. The app's **Open Safari Extension Settings** button
+   opens the extension preferences.
+
+4. In **Safari > Settings > Extensions**, enable **Light Torrent Magnet Links**.
+   Allow it to access the websites where you want magnet highlighting and
+   interception, then reload those website tabs. If the extension does not
+   appear immediately after allowing unsigned extensions, close and reopen
+   extension settings.
+
+The toolbar and magnet confirmation flow work like the Chromium version:
+the first approved operation asks for your final folder, starts or reuses the
+local client, and opens the dashboard only after it is ready. Folder preferences
+and the download queue are shared with the Chromium installation. You can close
+the containing app window; the native bridge launches on demand and exits after
+two idle minutes. There is no always-running HTTP bridge.
+The embedded **Light Torrent Helper** shows Safari's native folder picker;
+canceling it preserves your existing folder and starts no download.
+
+Safari uses dynamic document-start script registrations for both page-world
+shadow hooks and isolated magnet handling, including inherited-origin frames.
+Its `scripting` and HTTP/HTTPS host permissions support these registrations;
+Safari's website-access controls still determine where they run. The Safari
+extension remains sandboxed; only its native bridge can start the existing Node
+helper. The containing macOS app is not sandboxed so the Node helper retains
+the existing filesystem and folder-picker behavior. This is a local-development
+installation, not an App Store distribution package.
+
+Rerun `npm run install:safari` after changing extension/native Swift code, moving
+the project, or changing the Node.js executable. Reopen extension settings and
+reload website tabs afterward. Safari helper diagnostics are in
+`~/Library/Logs/Light Torrent/safari-helper.log`; the torrent client's log remains
+`~/Library/Logs/Light Torrent/client.log`.
+
+To remove Safari support, disable the extension in Safari, then unload its agent:
+
+```sh
+launchctl bootout "gui/$(id -u)/com.lighttorrent.safari.launcher"
+```
+
+Remove `~/Library/LaunchAgents/com.lighttorrent.safari.launcher.plist` and
+`~/Applications/Light Torrent Safari.app`. This does not remove downloads,
+settings, the queue, or Chromium's helper.
 
 ## Use
 
@@ -240,8 +316,9 @@ The helper accepts no arbitrary commands, paths, or magnet data
 and checks minimal local health/settings endpoints without reading your torrent
 queue. The helper reads a session token from the settings endpoint solely to
 apply the saved final folder through the protected settings reload endpoint.
-The extension uses a native port so its service worker stays alive while the
-folder picker is open.
+Chromium uses a native port while the folder picker is open. Safari uses native
+request/reply messaging through its sandboxed app extension and an on-demand
+macOS XPC bridge; neither native interface accepts arbitrary commands or paths.
 
 ## Test
 

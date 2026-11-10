@@ -28,7 +28,9 @@ async function createPopup(send) {
     } } },
     console: { error: (...details) => errors.push(details) }
   });
-  vm.runInContext(await readFile(new URL('../extension/popup.js', import.meta.url), 'utf8'), context);
+  for (const script of ['shared.js', 'popup.js']) {
+    vm.runInContext(await readFile(new URL(`../extension/${script}`, import.meta.url), 'utf8'), context);
+  }
   return { element, messages, errors, click: selector => element(selector).handlers.get('click')() };
 }
 

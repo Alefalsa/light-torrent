@@ -1,4 +1,5 @@
 globalThis.LightTorrentBridge = Object.freeze({
+  api: globalThis.browser ?? globalThis.chrome,
   clientOrigin: 'http://127.0.0.1:3000',
   normalizeMagnet(value) {
     if (typeof value !== 'string') return null;

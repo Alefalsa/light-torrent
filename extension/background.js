@@ -10,16 +10,24 @@ async function ensureClientRunning(action = 'start-client') {
   }
   if (!clientStartup) {
     startupAction = action;
+    if (LightTorrentBridge.api.runtime.getURL('').startsWith('safari-web-extension:')) {
+      clientStartup = LightTorrentBridge.api.runtime.sendNativeMessage('com.lighttorrent.safari', { action })
+        .then(result => {
+          if (!result?.ok) throw new Error(result?.error || 'The Safari helper did not confirm that the client is ready.');
+        })
+        .finally(() => { clientStartup = undefined; });
+      return clientStartup;
+    }
     // A native port keeps the service worker alive while the user chooses a folder.
     clientStartup = new Promise((resolve, reject) => {
-      const port = chrome.runtime.connectNative('com.lighttorrent.launcher');
+      const port = LightTorrentBridge.api.runtime.connectNative('com.lighttorrent.launcher');
       port.onMessage.addListener(result => {
         if (!result?.ok) reject(new Error(result?.error || 'The native helper did not confirm that the client is ready.'));
         else resolve();
         port.disconnect();
       });
       port.onDisconnect.addListener(() => {
-        const error = chrome.runtime.lastError;
+        const error = LightTorrentBridge.api.runtime.lastError;
         reject(new Error(`Client auto-start is unavailable: ${error?.message || 'The native helper disconnected before confirming readiness'}. Install the native helper and reload the extension.`));
       });
       port.postMessage({ action });
@@ -28,13 +36,13 @@ async function ensureClientRunning(action = 'start-client') {
   return clientStartup;
 }
 
-chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+LightTorrentBridge.api.runtime.onMessage.addListener((message, sender, sendResponse) => {
   if (!['open-light-torrent', 'client-control'].includes(message?.type)) return false;
   let url;
   let action = 'start-client';
   try {
     if (message.type === 'client-control') {
-      if (sender.id !== chrome.runtime.id || sender.url !== chrome.runtime.getURL('popup.html') ||
+      if (sender.id !== LightTorrentBridge.api.runtime.id || sender.url !== LightTorrentBridge.api.runtime.getURL('popup.html') ||
           !['open', 'change-folder'].includes(message.action) ||
           Object.keys(message).some(key => !['type', 'action'].includes(key))) {
         throw new Error('Only the extension toolbar can control the client.');
@@ -44,7 +52,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     } else {
       const source = sender.origin && sender.origin !== 'null' ? sender.origin : sender.url;
       // About:blank frames inherit a web origin even though their own URL is not HTTP.
-      if (sender.id !== chrome.runtime.id || !Number.isInteger(sender.tab?.id) ||
+      if (sender.id !== LightTorrentBridge.api.runtime.id || !Number.isInteger(sender.tab?.id) ||
           !/^https?:\/\//.test(source || '')) {
         throw new Error('Only magnet links clicked on web pages are accepted.');
       }
@@ -55,7 +63,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return false;
   }
   ensureClientRunning(action)
-    .then(() => url ? chrome.tabs.create({ url, active: true }) : undefined)
+    .then(() => url ? LightTorrentBridge.api.tabs.create({ url, active: true }) : undefined)
     .then(() => sendResponse({ ok: true }))
     .catch(error => {
       console.error('Light Torrent could not start or open the client:', error);

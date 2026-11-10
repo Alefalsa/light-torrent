@@ -13,7 +13,7 @@ async function control(action) {
     'Choose a folder in the native dialog. Cancel keeps your current folder.' :
     'Opening downloads. On first use, choose a final folder in the native dialog.';
   try {
-    const result = await chrome.runtime.sendMessage({ type: 'client-control', action });
+    const result = await LightTorrentBridge.api.runtime.sendMessage({ type: 'client-control', action });
     if (!result?.ok) throw new Error(result?.error || 'The extension did not respond.');
     status.textContent = action === 'change-folder' ?
       'Folder updated. New completions use it; existing completed files stay where they are.' :

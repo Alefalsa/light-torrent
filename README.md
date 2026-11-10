@@ -7,8 +7,8 @@ account, cloud service, Electron shell, or separate torrent daemon.
 ## Run
 
 The browser-extension workflow requires **Windows or macOS**, **Node.js 22 or newer**,
-and **Chrome, Chromium, Edge, or Brave** (Chromium 111 or newer). Firefox and
-Safari are not supported. The Node.js client can run on other platforms, but
+and **Chrome, Chromium, Edge, or Brave** (Chromium 111 or newer), or **Safari
+18.4 or newer on macOS**. Firefox is not supported. The Node.js client can run on other platforms, but
 the native helper installer and extension auto-start support Windows and macOS.
 
 Install a current Node.js LTS release from [nodejs.org](https://nodejs.org/en/download),
@@ -25,7 +25,13 @@ On Windows, use PowerShell or Command Prompt. If PowerShell blocks `npm.ps1`,
 use `npm.cmd` instead of `npm` in the commands below; no execution-policy change
 is required.
 
-Next, follow the [extension installation guide](extension/README.md#install):
+For Safari, follow the [macOS Safari setup](extension/README.md#safari-on-macos);
+it requires full Xcode and uses `npm run install:safari` to build a local app
+with an on-demand native bridge. No Apple Developer subscription is needed for
+local use, but Safari's unsigned-extension setting must be enabled after each
+Safari restart.
+
+For Chromium browsers, follow the [extension installation guide](extension/README.md#install):
 enable Developer mode, load the `extension` directory, and install the native
 helper for its extension ID. **Both the extension and helper are required for
 the browser workflow, even if the client is already running.**
@@ -37,8 +43,9 @@ Canceling does not start the client or add the magnet and lets you choose again
 on the next approval. The helper then starts the client automatically
 and opens **http://127.0.0.1:3000**, where the download appears in the queue.
 The dashboard has no manual input or `.torrent` upload panel. The extension
-itself has no npm dependencies or separate build step; `npm ci` installs the
-local client's dependencies.
+itself has no npm dependencies; `npm ci` installs the local client's
+dependencies. Chromium loads the extension directly; Safari requires the local
+app build described above.
 
 For manual startup or debugging, run this from the project directory:
 

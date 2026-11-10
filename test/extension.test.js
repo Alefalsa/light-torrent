@@ -8,7 +8,7 @@ const magnet = `magnet:?xt=urn:btih:${'a'.repeat(40)}&dn=Example%20File`;
 const sender = { id: 'light-torrent-test', tab: { id: 1 }, url: 'https://example.test/' };
 
 async function setup({ approved = true, tabError = null, nativeError = null, nativeResult = { ok: true },
-  deferNative = false, buildDOM = () => ({}) } = {}) {
+  deferNative = false, safari = false, buildDOM = () => ({}) } = {}) {
   const tabs = [];
   const confirmations = [];
   const alerts = [];
@@ -104,9 +104,15 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
   const chrome = {
     runtime: {
       id: sender.id,
-      getURL: name => `chrome-extension://${sender.id}/${name}`,
+      getURL: name => `${safari ? 'safari-web-extension' : 'chrome-extension'}://${sender.id}/${name}`,
       onMessage: { addListener(handler) { onMessage = handler; } },
       sendMessage: message => dispatch(message),
+      async sendNativeMessage(host, request) {
+        nativeRequests.push({ host, request });
+        if (nativeError) throw new Error(nativeError);
+        if (deferNative) return new Promise(resolve => nativeReplies.push(resolve));
+        return nativeResult;
+      },
       connectNative(host) {
         let messageListener;
         let disconnectListener;
@@ -142,8 +148,10 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
       }
     }
   };
+  const browser = safari ? { ...chrome, runtime: { ...chrome.runtime } } : undefined;
+  if (safari) chrome.runtime.sendNativeMessage = () => { throw new Error("Use Safari's promise-based browser namespace."); };
   const context = vm.createContext({
-    chrome, Element, ShadowRoot, Event, CSSStyleSheet, MutationObserver, document, URLSearchParams,
+    chrome, browser, Element, ShadowRoot, Event, CSSStyleSheet, MutationObserver, document, URLSearchParams,
     window: { addEventListener(name, handler, capture) {
       assert.equal(capture, true);
       handlers.set(name, handler);
@@ -418,6 +426,41 @@ test('native startup failure prevents opening a broken client tab', async () => 
     assert.equal(fixture.tabs.length, 0);
     assert.equal(fixture.alerts.length, 1);
     assert.match(fixture.alerts[0], /could not open the client/);
+  }
+});
+
+test('Safari approvals use the bundled native bridge rather than a Chromium host port', async () => {
+  const fixture = await setup({ safari: true, deferNative: true });
+  const first = fixture.click();
+  const second = fixture.click();
+  assert.equal(fixture.nativeRequests.length, 1);
+  assert.equal(fixture.nativeRequests[0].host, 'com.lighttorrent.safari');
+  assert.equal(fixture.nativeRequests[0].request.action, 'start-client');
+  assert.equal(fixture.nativePorts.length, 0);
+  assert.equal(fixture.tabs.length, 0);
+  fixture.replyNative({ ok: true });
+  await Promise.all([first, second]);
+  assert.equal(fixture.tabs.length, 2);
+  const popup = { id: sender.id, url: `safari-web-extension://${sender.id}/popup.html` };
+  const changing = fixture.dispatch({ type: 'client-control', action: 'change-folder' }, popup);
+  assert.equal(fixture.nativeRequests[1].request.action, 'change-folder');
+  fixture.replyNative({ ok: true });
+  assert.equal((await changing).ok, true);
+});
+
+test('Safari bridge failures open no tab, remain visible, and allow retry', async () => {
+  for (const options of [
+    { nativeError: 'Safari helper unavailable' },
+    { nativeResult: { ok: false, error: 'Folder selection canceled' } },
+    { nativeResult: null }
+  ]) {
+    const fixture = await setup({ safari: true, ...options });
+    await fixture.click();
+    await fixture.click();
+    assert.equal(fixture.tabs.length, 0);
+    assert.equal(fixture.nativePorts.length, 0);
+    assert.equal(fixture.nativeRequests.length, 2);
+    assert.equal(fixture.alerts.length, 2);
   }
 });
 
