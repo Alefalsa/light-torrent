@@ -48,7 +48,7 @@ test('toolbar disables actions during a native dialog and restores them after su
   await changing;
   assert.equal(fixture.element('#open-downloads').disabled, false);
   assert.equal(fixture.element('#change-folder').disabled, false);
-  assert.match(fixture.element('#status').textContent, /existing completed files stay/);
+  assert.match(fixture.element('#status').textContent, /New downloads use it; existing downloads stay/);
 });
 
 test('toolbar opens downloads and surfaces errors without swallowing them', async () => {

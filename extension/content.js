@@ -1,20 +1,30 @@
 (() => {
   const marker = 'light-torrent-magnet-link';
+  const iconClass = 'light-torrent-magnet-icon';
+  const icons = new WeakMap();
   const sheet = new CSSStyleSheet();
   sheet.replaceSync(`
-    a.${marker} {
-      box-shadow: inset 0 -1.1em 0 rgba(16, 185, 129, 0.18) !important;
-      text-decoration-line: underline !important;
-      text-decoration-color: rgba(16, 185, 129, 0.85) !important;
-      text-decoration-thickness: 2px !important;
-      text-underline-offset: 0.18em !important;
+    a.${marker} > .${iconClass} {
+      all: unset !important;
+      display: inline-block !important;
+      width: 0.85em !important;
+      height: 0.85em !important;
+      margin-inline-start: 0 !important;
+      vertical-align: -0.08em !important;
+      flex-shrink: 0 !important;
+      fill: currentColor !important;
+      opacity: 0.7 !important;
+      pointer-events: none !important;
     }
-    a.${marker}:hover, a.${marker}:focus-visible {
-      box-shadow: inset 0 -1.1em 0 rgba(16, 185, 129, 0.28) !important;
-      text-decoration-color: #059669 !important;
+    a.${marker} > .${iconClass} > path {
+      fill: inherit !important;
+      stroke: none !important;
+    }
+    a.${marker}:hover > .${iconClass}, a.${marker}:focus-visible > .${iconClass} {
+      opacity: 1 !important;
     }
     a.${marker}:focus-visible {
-      outline: 2px solid #10b981 !important;
+      outline: 2px solid currentColor !important;
       outline-offset: 3px !important;
     }
   `);
@@ -28,7 +38,26 @@
 
   function highlight(element) {
     if (element.localName === 'a') {
-      element.classList.toggle(marker, Boolean(LightTorrentBridge.normalizeMagnet(element.getAttribute('href'))));
+      const magnet = Boolean(LightTorrentBridge.normalizeMagnet(element.getAttribute('href')));
+      element.classList.toggle(marker, magnet);
+      let icon = icons.get(element);
+      if (magnet) {
+        if (!icon) {
+          icon = document.createElementNS('http://www.w3.org/2000/svg', 'svg');
+          icon.classList.add(iconClass);
+          icon.setAttribute('aria-hidden', 'true');
+          icon.setAttribute('focusable', 'false');
+          icon.setAttribute('viewBox', '0 0 24 24');
+          const shape = document.createElementNS('http://www.w3.org/2000/svg', 'path');
+          shape.setAttribute('d', 'M4 8h5v4a3 3 0 0 0 6 0V8h5v4a8 8 0 0 1-16 0V8ZM4 2h5v4H4zM15 2h5v4h-5z');
+          icon.append(shape);
+          icons.set(element, icon);
+        }
+        if (element.lastChild !== icon) element.append(icon);
+      } else if (icon) {
+        icon.remove();
+        icons.delete(element);
+      }
     }
     if (element.shadowRoot) observeRoot(element.shadowRoot);
   }
@@ -54,6 +83,7 @@
       for (const record of records) {
         if (record.type === 'attributes') highlight(record.target);
         else {
+          if (record.target instanceof Element) highlight(record.target);
           for (const node of record.addedNodes) scan(node, visited);
           removed ||= record.removedNodes.length > 0;
         }

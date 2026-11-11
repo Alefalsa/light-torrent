@@ -67,6 +67,8 @@ async function completedFixture(t, contents = { 'complete.txt': 'A verified comp
   const fixture = await setup(t, options);
   const added = await fixture.post('/api/torrents', { kind: 'magnet', value: magnet });
   const entry = fixture.app.queue.entries.get(added.body.id);
+  // Exercise recovery of the previous staging-and-move workflow.
+  delete entry.downloadDirectory;
   const files = Object.entries(contents).map(([file, content]) => ({ path: file, length: Buffer.byteLength(content) }));
   fixture.app.queue.prepareFiles(entry, files);
   for (const [file, content] of Object.entries(contents)) {
@@ -152,7 +154,7 @@ test('persists paused queue, rejects duplicates, resumes, and preserves files on
   assert.deepEqual(saved.torrents, []);
 });
 
-test('first extension use applies the chosen folder to a running client and completion survives restart', async t => {
+test('first extension use applies the chosen folder and legacy completion moves survive restart', async t => {
   const fixture = await completedFixture(t);
   const { app, root, entry, files, settingsFile, url } = fixture;
   const finalFolder = path.join(root, 'chosen final folder');
@@ -181,6 +183,8 @@ test('toolbar folder changes apply to a running client and cancellation preserve
   await saveCompletedDirectory(first, settingsFile);
   await startClient({ url, settingsFile });
   assert.equal(app.queue.completedDir, first);
+  const added = await app.queue.add({ kind: 'magnet', value: magnet });
+  assert.equal(added.path, first);
   await assert.rejects(startClient({
     url, settingsFile, selectAgain: true, chooseDirectory: async () => undefined
   }), /selection canceled/);
@@ -191,6 +195,12 @@ test('toolbar folder changes apply to a running client and cancellation preserve
   }), { started: false });
   assert.equal(app.queue.completedDir, second);
   assert.equal(await readCompletedDirectory(settingsFile), second);
+  assert.equal(app.queue.describe(app.queue.entries.get(added.id)).path, first);
+  const newer = await app.queue.add({ kind: 'magnet', value: `magnet:?xt=urn:btih:${'b'.repeat(40)}` });
+  assert.equal(newer.path, second);
+  await app.close();
+  const saved = JSON.parse(await readFile(path.join(root, 'data/queue.json'), 'utf8'));
+  assert.deepEqual(saved.torrents.map(entry => entry.downloadDirectory), [first, second]);
 });
 
 test('folder settings reload is protected and never applies unselected or invalid folders', async t => {
@@ -448,11 +458,11 @@ test('standalone exits after idle or signal cleanup despite lingering handles, a
     children.push({ child, completed });
     if (trigger !== 'startup-failure') {
       await waitFor(() => spawnError ||
-        (stdout.includes('Light Torrent is ready') && stdout.includes('Completed downloads:')) ||
+        (stdout.includes('Light Torrent is ready') && stdout.includes('New downloads:')) ||
         child.exitCode !== null, 5000);
       if (spawnError) throw spawnError;
       assert.match(stdout, /Light Torrent is ready/, stderr);
-      assert.ok(stdout.includes(`Completed downloads: ${finalFolder}`), stdout);
+      assert.ok(stdout.includes(`New downloads: ${finalFolder}`), stdout);
       if (trigger === 'save-failure') await rename(dataDir, path.join(directory, 'saved-data'));
       if (trigger !== 'idle') {
         const signal = trigger === 'save-failure' ? 'SIGTERM' : trigger;
@@ -473,7 +483,7 @@ test('standalone exits after idle or signal cleanup despite lingering handles, a
       assert.equal(await readFile(path.join(directory, 'saved-data/queue.json'), 'utf8'), initial);
     } else {
       assert.deepEqual(JSON.parse(await readFile(path.join(dataDir, 'queue.json'), 'utf8')),
-        { version: 2, torrents: [], files: {} });
+        { version: 3, torrents: [], files: {} });
       assert.equal((await readdir(dataDir)).includes('queue.lock'), false);
       if (trigger === 'idle') assert.match(stdout, /No active torrents/);
     }
@@ -499,7 +509,7 @@ test('rejects unsupported filenames in every path component before reserving fil
   }
 });
 
-test('downloads a real magnet, moves completed files, stops seeding, and restores completed state', async t => {
+test('downloads a real magnet directly into its final folder, stops seeding, and restores completed state', async t => {
   const fixture = await setup(t, { idleTimeoutMs: 500 });
   const seeder = new WebTorrent(offline);
   t.after(() => new Promise(resolve => seeder.destroy(resolve)));
@@ -514,12 +524,15 @@ test('downloads a real magnet, moves completed files, stops seeding, and restore
   const added = await fixture.post('/api/torrents', { kind: 'magnet', value: seed.magnetURI });
   assert.equal(added.status, 201);
   const entry = fixture.app.queue.entries.get(added.body.id);
+  assert.equal(entry.torrent.path, path.join(fixture.root, 'finished'));
+  fixture.app.queue.copyCompletedSource = async () => { throw new Error('Direct downloads must not be copied'); };
+  fixture.app.queue.stageCompletedFile = async () => { throw new Error('Direct downloads must not be staged'); };
   await waitFor(() => entry.torrent.infoHash);
   entry.torrent.addPeer(`127.0.0.1:${seeder.address().port}`);
   await waitFor(() => entry.completed);
   const destination = path.join(fixture.root, 'finished', 'sample.txt');
-  assert.equal(added.body.path, path.join(fixture.root, 'downloads'));
-  assert.deepEqual(await readdir(added.body.path), []);
+  assert.equal(added.body.path, path.join(fixture.root, 'finished'));
+  assert.deepEqual(await readdir(path.join(fixture.root, 'downloads')), []);
   assert.deepEqual(await readFile(destination), content);
   assert.equal(fixture.app.queue.snapshot().torrents[0].status, 'Completed');
   assert.equal(fixture.app.queue.snapshot().torrents[0].path, path.dirname(destination));
@@ -536,6 +549,160 @@ test('downloads a real magnet, moves completed files, stops seeding, and restore
   assert.equal((await reopened.post(`/api/torrents/${entry.id}/resume`)).status, 409);
   assert.equal((await reopened.post(`/api/torrents/${entry.id}/remove`)).status, 200);
   assert.deepEqual(await readFile(destination), content);
+});
+
+test('verifies existing destination data before reuse and never overwrites unrelated files', async t => {
+  for (const scenario of [
+    { name: 'matching single file', contents: { 'existing.txt': 'Verified data.\n'.repeat(3000) } },
+    { name: 'same-size mismatch', contents: { 'existing.txt': 'Verified data.\n'.repeat(3000) }, mismatch: true },
+    { name: 'ownership save failure', contents: { 'existing.txt': 'Verified data.\n'.repeat(3000) }, saveFailure: true },
+    { name: 'different size', contents: { 'existing.txt': 'Verified data.\n'.repeat(3000) }, truncate: true },
+    { name: 'matching cross-file pieces and empty file', contents: { 'one.txt': 'a'.repeat(12000), 'two.txt': 'b'.repeat(12000), 'empty.txt': '' } },
+    { name: 'unverifiable cross-file boundary', contents: { 'one.txt': 'a'.repeat(12000), 'two.txt': 'b'.repeat(12000) }, missingNeighbor: true }
+  ]) {
+    await t.test(scenario.name, async t => {
+      const fixture = await setup(t);
+      const seeder = new WebTorrent(offline);
+      t.after(() => new Promise(resolve => seeder.destroy(resolve)));
+      const source = path.join(fixture.root, 'source', 'bundle');
+      await mkdir(source, { recursive: true });
+      for (const [name, content] of Object.entries(scenario.contents)) await writeFile(path.join(source, name), content);
+      const names = Object.keys(scenario.contents);
+      const seedPath = names.length === 1 ? path.join(source, names[0]) : source;
+      const seed = await new Promise((resolve, reject) => {
+        seeder.seed(seedPath, { announce: [], pieceLength: 16384 }, resolve).once('error', reject);
+      });
+      const existing = [];
+      for (const file of seed.files) {
+        if (scenario.missingNeighbor && existing.length) continue;
+        const target = path.join(fixture.root, 'finished', file.path);
+        let content = Buffer.from(scenario.contents[path.basename(file.path)]);
+        if (scenario.mismatch) content[0] ^= 0xff;
+        if (scenario.truncate) content = content.subarray(0, content.length - 1);
+        await mkdir(path.dirname(target), { recursive: true });
+        await writeFile(target, content);
+        existing.push({ target, content, stat: await fs.lstat(target, { bigint: true }) });
+      }
+      const { parsed } = await parseSource({ kind: 'file', value: Buffer.from(seed.torrentFile).toString('base64') });
+      const prepare = () => fixture.app.queue.prepareFiles({
+        infoHash: parsed.infoHash, downloadDirectory: path.join(fixture.root, 'finished')
+      }, parsed.files, { verifyExisting: true });
+      if (scenario.truncate) assert.throws(prepare, /cannot be safely reused/);
+      else assert.equal(prepare().size, existing.length);
+      // Unknown files must never acquire persisted ownership before verification.
+      for (const { target } of existing) {
+        const relative = path.relative(path.join(fixture.root, 'finished'), target);
+        assert.equal(fixture.app.queue.fileOwners.has(fixture.app.queue.fileKey(relative, path.join(fixture.root, 'finished'))), false);
+      }
+      if (scenario.saveFailure) {
+        const prepareFiles = fixture.app.queue.prepareFiles;
+        fixture.app.queue.prepareFiles = function (entry, files, options) {
+          if (!options?.verifiedFiles?.size) return prepareFiles.call(this, entry, files, options);
+          const save = this.save;
+          this.save = () => { throw new Error('Verified ownership could not be saved'); };
+          try {
+            return prepareFiles.call(this, entry, files, options);
+          } finally {
+            this.save = save;
+          }
+        };
+      }
+      const input = scenario.mismatch ? { kind: 'magnet', value: seed.magnetURI } :
+        { kind: 'file', value: Buffer.from(seed.torrentFile).toString('base64') };
+      const added = await fixture.post('/api/torrents', input);
+      const entry = fixture.app.queue.entries.get(added.body.id);
+      if (scenario.mismatch) {
+        await waitFor(() => entry.torrent?.infoHash);
+        entry.torrent.addPeer(`127.0.0.1:${seeder.address().port}`);
+      }
+      const fails = scenario.mismatch || scenario.truncate || scenario.missingNeighbor || scenario.saveFailure;
+      await waitFor(() => entry.completed || entry.error);
+      if (fails) {
+        assert.match(entry.error, /cannot be safely reused|does not match verified torrent data|ownership could not be saved/);
+        assert.equal(entry.completed, undefined);
+        assert.equal(entry.paused, true);
+        assert.equal(entry.torrent, null);
+      } else {
+        assert.equal(entry.error, null);
+        assert.equal(entry.completed, true);
+      }
+      if (scenario.mismatch) await waitFor(() => seeder.torrents[0].numPeers === 0);
+      else assert.equal(seeder.torrents[0].numPeers, 0);
+      assert.deepEqual(await readdir(path.join(fixture.root, 'downloads')), []);
+      for (const { target, content, stat } of existing) {
+        assert.deepEqual(await readFile(target), content);
+        const current = await fs.lstat(target, { bigint: true });
+        assert.equal(current.ino, stat.ino);
+        assert.equal(current.mtimeNs, stat.mtimeNs);
+        if (fails) {
+          const key = fixture.app.queue.fileKey(path.relative(path.join(fixture.root, 'finished'), target), path.join(fixture.root, 'finished'));
+          assert.equal(fixture.app.queue.fileOwners.has(key), false);
+        }
+      }
+    });
+  }
+});
+
+test('directory-scoped ownership allows identical relative names and survives restart', async t => {
+  const fixture = await setup(t);
+  const { app, root, post } = fixture;
+  const added = await post('/api/torrents', { kind: 'magnet', value: magnet });
+  const first = app.queue.entries.get(added.body.id);
+  const secondDirectory = path.join(root, 'second');
+  app.queue.completedDir = secondDirectory;
+  const newer = await post('/api/torrents', { kind: 'magnet', value: `magnet:?xt=urn:btih:${'b'.repeat(40)}` });
+  const second = app.queue.entries.get(newer.body.id);
+  const files = [{ path: 'same.txt', length: 0 }];
+  app.queue.prepareFiles(first, files);
+  app.queue.prepareFiles(second, files);
+  const alias = path.join(root, 'same-folder-alias');
+  await mkdir(first.downloadDirectory, { recursive: true });
+  await symlink(first.downloadDirectory, alias, process.platform === 'win32' ? 'junction' : 'dir');
+  app.queue.completedDir = alias;
+  const third = await app.queue.add({ kind: 'magnet', value: `magnet:?xt=urn:btih:${'c'.repeat(40)}` });
+  assert.throws(() => app.queue.prepareFiles(app.queue.entries.get(third.id), files), /already belongs/);
+  await app.queue.action(third.id, 'remove');
+  await app.queue.action(first.id, 'pause');
+  await app.queue.action(second.id, 'pause');
+  await app.close();
+  const reopened = await fixture.open();
+  const queue = reopened.app.queue;
+  assert.equal(queue.fileOwners.get(queue.fileKey('same.txt', first.downloadDirectory)), first.infoHash);
+  assert.equal(queue.fileOwners.get(queue.fileKey('same.txt', secondDirectory)), second.infoHash);
+  assert.equal(queue.describe(queue.entries.get(first.id)).path, first.downloadDirectory);
+  assert.equal(queue.describe(queue.entries.get(second.id)).path, secondDirectory);
+  await queue.scheduleCompletion(queue.entries.get(first.id), files);
+  await queue.scheduleCompletion(queue.entries.get(second.id), files);
+  assert.equal((await fs.stat(path.join(first.downloadDirectory, 'same.txt'))).size, 0);
+  assert.equal((await fs.stat(path.join(secondDirectory, 'same.txt'))).size, 0);
+});
+
+test('version two restores pin unfinished downloads and upgrade relative ownership', async t => {
+  const fixture = await setup(t);
+  const added = await fixture.post('/api/torrents', { kind: 'magnet', value: magnet });
+  await fixture.post(`/api/torrents/${added.body.id}/pause`);
+  await fixture.app.close();
+  const stateFile = path.join(fixture.root, 'data/queue.json');
+  const state = JSON.parse(await readFile(stateFile, 'utf8'));
+  state.version = 2;
+  state.files = { 'legacy.txt': 'a'.repeat(40) };
+  for (const record of state.torrents) delete record.downloadDirectory;
+  await writeFile(stateFile, JSON.stringify(state));
+  const reopened = await fixture.open();
+  const queue = reopened.app.queue;
+  const entry = queue.entries.get(added.body.id);
+  assert.equal(entry.downloadDirectory, path.join(fixture.root, 'downloads'));
+  assert.equal(queue.fileOwners.get(queue.fileKey('legacy.txt')), entry.infoHash);
+  queue.completedDir = path.join(fixture.root, 'a different selection');
+  const content = 'Legacy retained data.';
+  await writeFile(path.join(entry.downloadDirectory, 'legacy.txt'), content);
+  await queue.scheduleCompletion(entry, [{ path: 'legacy.txt', length: Buffer.byteLength(content) }]);
+  assert.equal(entry.completedDirectory, entry.downloadDirectory);
+  assert.equal(await readFile(path.join(entry.downloadDirectory, 'legacy.txt'), 'utf8'), content);
+  const upgraded = JSON.parse(await readFile(stateFile, 'utf8'));
+  assert.equal(upgraded.version, 3);
+  assert.equal(upgraded.torrents[0].downloadDirectory, entry.downloadDirectory);
+  assert.equal(upgraded.files[queue.fileKey('legacy.txt')], entry.infoHash);
 });
 
 test('completion collisions preserve both files and Retry move finishes without reconnecting peers', async t => {
@@ -764,6 +931,7 @@ test('claims shared paths safely, preserves legacy copies, and never overwrites 
   const downloads = path.join(root, 'downloads');
   const added = await post('/api/torrents', { kind: 'magnet', value: magnet });
   const entry = queue.entries.get(added.body.id);
+  delete entry.downloadDirectory;
   const files = [{ path: 'bundle/nested/file.txt' }];
   const old = path.join(downloads, entry.id);
   entry.legacyDirectory = entry.id;
@@ -774,7 +942,7 @@ test('claims shared paths safely, preserves legacy copies, and never overwrites 
   assert.equal(await readFile(path.join(downloads, files[0].path), 'utf8'), 'retained partial data');
   assert.deepEqual(await readdir(downloads), ['bundle']);
   assert.throws(() => queue.prepareFiles({ infoHash: 'b'.repeat(40) }, files), /already belongs/);
-  assert.throws(() => queue.prepareFiles({ infoHash: 'b'.repeat(40) }, [{ path: 'bundle' }]), /cannot be safely overwritten/);
+  assert.throws(() => queue.prepareFiles({ infoHash: 'b'.repeat(40) }, [{ path: 'bundle' }]), /blocked/);
   assert.throws(() => queue.prepareFiles(entry, [{ path: '../escape.txt' }]), /outside/);
   assert.throws(() => queue.prepareFiles(entry, [{ path: 'colon:name.txt' }]), /unsupported/);
   if (process.platform === 'darwin' || process.platform === 'win32') {
@@ -784,7 +952,7 @@ test('claims shared paths safely, preserves legacy copies, and never overwrites 
   await writeFile(path.join(old, 'unknown.txt'), 'old copy');
   await writeFile(path.join(downloads, 'unknown.txt'), 'unrecognized root copy');
   entry.legacyDirectory = entry.id;
-  assert.throws(() => queue.prepareFiles(entry, [{ path: 'unknown.txt' }]), /cannot be safely overwritten/);
+  assert.throws(() => queue.prepareFiles(entry, [{ path: 'unknown.txt' }]), /cannot be safely reused/);
   assert.equal(await readFile(path.join(old, 'unknown.txt'), 'utf8'), 'old copy');
   assert.equal(await readFile(path.join(downloads, 'unknown.txt'), 'utf8'), 'unrecognized root copy');
   await mkdir(path.join(old, 'bundle/nested'), { recursive: true });
@@ -811,8 +979,10 @@ test('releases missing unqueued paths atomically but protects queued owners and 
   const queue = app.queue;
   const first = await post('/api/torrents', { kind: 'magnet', value: magnet });
   const owner = queue.entries.get(first.body.id);
+  delete owner.downloadDirectory;
   const second = await post('/api/torrents', { kind: 'magnet', value: `magnet:?xt=urn:btih:${'b'.repeat(40)}` });
   const replacement = queue.entries.get(second.body.id);
+  delete replacement.downloadDirectory;
   const files = [{ path: 'missing.txt' }, { path: 'missing-directory/child.txt' }];
   queue.prepareFiles(owner, files);
   await post(`/api/torrents/${owner.id}/pause`);
@@ -846,7 +1016,7 @@ test('releases missing unqueued paths atomically but protects queued owners and 
   queue.save();
   const fileStat = queue.fileStat;
   // Exercise normalized-name lookup even on a case-insensitive filesystem.
-  const canonical = queue.filePath(queue.fileKey(filename));
+  const canonical = queue.fileKey(filename);
   queue.fileStat = file => file === canonical ? null : fileStat.call(queue, file);
   assert.throws(() => queue.prepareFiles(replacement, [{ path: filename }]), /already belongs/);
   queue.fileStat = fileStat;
@@ -863,6 +1033,7 @@ test('releases missing unqueued paths atomically but protects queued owners and 
 
 test('multi-file downloads preserve torrent structure and legacy queue restores migrate partial files', async t => {
   const fixture = await setup(t);
+  fixture.app.queue.completedDir = path.join(fixture.root, 'downloads');
   const seeder = new WebTorrent(offline);
   t.after(() => new Promise(resolve => seeder.destroy(resolve)));
   const source = path.join(fixture.root, 'bundle');
@@ -893,6 +1064,7 @@ test('multi-file downloads preserve torrent structure and legacy queue restores 
   const state = JSON.parse(await readFile(stateFile, 'utf8'));
   state.version = 1;
   delete state.files;
+  for (const record of state.torrents) delete record.downloadDirectory;
   await writeFile(stateFile, JSON.stringify(state));
   const reopened = await fixture.open();
   assert.equal(reopened.app.queue.snapshot().torrents[0].status, 'Paused');
@@ -904,10 +1076,10 @@ test('multi-file downloads preserve torrent structure and legacy queue restores 
   assert.equal(restored.torrent.done, false);
   restored.torrent.addPeer(`127.0.0.1:${seeder.address().port}`);
   await waitFor(() => restored.completed);
-  assert.deepEqual(await readFile(path.join(fixture.root, 'finished/bundle/one.txt')), content);
-  assert.deepEqual(await readFile(path.join(fixture.root, 'finished/bundle/nested/two.txt')), content);
-  assert.deepEqual(await readdir(downloads), []);
-  assert.deepEqual(await readdir(path.join(fixture.root, 'finished')), ['bundle']);
+  assert.deepEqual(await readFile(path.join(downloads, 'bundle/one.txt')), content);
+  assert.deepEqual(await readFile(path.join(downloads, 'bundle/nested/two.txt')), content);
+  assert.deepEqual(await readdir(downloads), ['bundle']);
+  assert.equal(restored.completedDirectory, downloads);
 });
 
 test('metadata path conflicts stop the engine before existing data can be changed, even after removal', async t => {
@@ -930,7 +1102,7 @@ test('metadata path conflicts stop the engine before existing data can be change
   const original = fixture.app.queue.entries.get(first.body.id);
   await waitFor(() => original.torrent.ready);
   await fixture.post(`/api/torrents/${original.id}/pause`);
-  const target = path.join(fixture.root, 'downloads/shared.txt');
+  const target = path.join(fixture.root, 'finished/shared.txt');
   await writeFile(target, 'First content.');
   const second = await fixture.post('/api/torrents', uploads[1]);
   const conflict = fixture.app.queue.entries.get(second.body.id);

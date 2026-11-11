@@ -16,7 +16,7 @@ async function control(action) {
     const result = await LightTorrentBridge.api.runtime.sendMessage({ type: 'client-control', action });
     if (!result?.ok) throw new Error(result?.error || 'The extension did not respond.');
     status.textContent = action === 'change-folder' ?
-      'Folder updated. New completions use it; existing completed files stay where they are.' :
+      'Folder updated. New downloads use it; existing downloads stay where they are.' :
       'Downloads opened.';
   } catch (error) {
     console.error('Light Torrent toolbar action failed:', error);

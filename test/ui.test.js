@@ -158,7 +158,7 @@ test('completed and moving torrents show accurate locations and safe action butt
   assert.equal(row.querySelector('.remove').disabled, false);
   assert.equal(row.querySelector('.file-path').textContent, '/home/Downloads');
   assert.equal(element('#active-count').textContent, 0);
-  assert.match(element('#download-dir').textContent, /unfinished.*completed/);
+  assert.equal(element('#download-dir').textContent, '/home/Downloads (new downloads)');
   Object.assign(torrent, { length: 0, downloaded: 0 });
   vm.runInContext('render(state)', context);
   assert.match(row.querySelector('.size').textContent, /100%.*0 B of 0 B/);
@@ -173,6 +173,10 @@ test('completed and moving torrents show accurate locations and safe action butt
   assert.equal(row.querySelector('.toggle').textContent, 'Retry move');
   assert.equal(row.querySelector('.toggle').disabled, false);
   assert.equal(row.querySelector('.toggle').dataset.action, 'resume');
+  assert.equal(row.querySelector('.remove').disabled, true);
+  Object.assign(torrent, { pendingMove: false, pendingCompletion: true });
+  vm.runInContext('render(state)', context);
+  assert.equal(row.querySelector('.toggle').textContent, 'Retry completion');
   assert.equal(row.querySelector('.remove').disabled, true);
 });
 

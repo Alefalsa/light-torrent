@@ -31,6 +31,7 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
     get isConnected() {
       return this.nodeType === 9 || Boolean(this.host?.isConnected || this.parentNode?.isConnected);
     }
+    get lastChild() { return this.children.at(-1) ?? null; }
     querySelectorAll(selector) {
       assert.equal(selector, '*');
       this.scans++;
@@ -52,10 +53,20 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
       this.localName = localName;
       this.shadowRoot = null;
       this.classes = new Set();
-      this.classList = { toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name) };
+      this.attributes = new Map();
+      this.classList = {
+        toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name),
+        add: name => this.classes.add(name)
+      };
     }
     hasAttribute(name) { return name === 'href' && this.href !== null; }
-    getAttribute(name) { return name === 'href' ? this.href : null; }
+    getAttribute(name) { return name === 'href' ? this.href : this.attributes.get(name) ?? null; }
+    setAttribute(name, value) { this.attributes.set(name, value); }
+    append(node) { append(this, node); }
+    remove() {
+      if (this.parentNode) this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1);
+      this.parentNode = null;
+    }
     attachShadow(options) {
       if (!['open', 'closed'].includes(options?.mode)) throw new TypeError('Invalid shadow mode.');
       const root = new ShadowRoot(this, options.mode);
@@ -83,6 +94,11 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
     disconnect() { this.active = false; }
   }
   const document = new Root(9);
+  document.createElementNS = (namespace, name) => {
+    const element = new Element(null, name);
+    element.namespaceURI = namespace;
+    return element;
+  };
   function append(parent, node) {
     if (node.parentNode) node.parentNode.children.splice(node.parentNode.children.indexOf(node), 1);
     parent.children.push(node);
@@ -209,7 +225,7 @@ test('manifest requests only native messaging and uses local scripts without ext
   assert.doesNotMatch(await readFile(new URL('shadow-roots.js', folder), 'utf8'), /chrome\.|sendMessage|fetch\(/);
 });
 
-test('highlights existing magnets without boxes or text changes and keeps keyboard focus visible', async () => {
+test('marks magnets with a decorative monochrome icon without restyling links and keeps focus visible', async () => {
   const fixture = await setup({ buildDOM({ document, Element, append }) {
     const magnets = [magnet, ` MAGNET:${magnet.slice(7)} `].map(href => append(document, new Element(href)));
     const others = ['https://example.test/', null, 'magnet:?' + 'a'.repeat(16384)]
@@ -227,16 +243,26 @@ test('highlights existing magnets without boxes or text changes and keeps keyboa
   assert.equal(fixture.document.adoptedStyleSheets[0], fixture.built.pageStyle);
   const sheet = fixture.document.adoptedStyleSheets[1];
   assert.equal(fixture.built.root.adoptedStyleSheets[0], sheet);
-  const restingStyle = sheet.text.match(/a\.light-torrent-magnet-link\s*\{([^}]+)\}/)[1];
-  assert.doesNotMatch(restingStyle, /outline\s*:/);
-  assert.match(restingStyle, /rgba\(16, 185, 129, 0\.18\)/);
-  assert.match(restingStyle, /text-decoration-line: underline/);
-  assert.match(restingStyle, /text-decoration-color: rgba\(16, 185, 129, 0\.85\)/);
-  assert.match(restingStyle, /text-decoration-thickness: 2px/);
-  assert.match(sheet.text, /:hover.*:focus-visible/);
-  assert.match(sheet.text, /rgba\(16, 185, 129, 0\.28\)/);
-  assert.match(sheet.text, /:focus-visible\s*\{\s*outline: 2px solid #10b981/);
-  assert.doesNotMatch(sheet.text, /(?:^|\n)\s*(?:background[\w-]*|color|padding|margin|border[\w-]*|font[\w-]*|content)\s*:/);
+  assert.match(sheet.text, /a\.light-torrent-magnet-link > \.light-torrent-magnet-icon/);
+  assert.match(sheet.text, /fill: currentColor/);
+  assert.match(sheet.text, /fill: inherit/);
+  assert.match(sheet.text, /width: 0\.85em/);
+  assert.match(sheet.text, /height: 0\.85em/);
+  assert.match(sheet.text, /margin-inline-start: 0 !important/);
+  assert.match(sheet.text, /:hover > .*:focus-visible > /);
+  assert.match(sheet.text, /:focus-visible\s*\{\s*outline: 2px solid currentColor/);
+  assert.doesNotMatch(sheet.text, /background|box-shadow|text-decoration|#10b981|rgba\(|::after|::before|url\(/);
+  assert.doesNotMatch(sheet.text, /(?:^|\n)\s*(?:color|padding|border[\w-]*|font[\w-]*|content)\s*:/);
+  for (const anchor of [...fixture.built.magnets, fixture.built.nested]) {
+    assert.equal(anchor.children.length, 1);
+    assert.ok(anchor.lastChild.classes.has('light-torrent-magnet-icon'));
+    assert.equal(anchor.lastChild.getAttribute('aria-hidden'), 'true');
+    assert.equal(anchor.lastChild.getAttribute('focusable'), 'false');
+    assert.equal(anchor.lastChild.namespaceURI, 'http://www.w3.org/2000/svg');
+    assert.equal(anchor.lastChild.lastChild.localName, 'path');
+    assert.ok(anchor.lastChild.lastChild.getAttribute('d'));
+  }
+  for (const anchor of fixture.built.others) assert.equal(anchor.children.length, 0);
   assert.equal(fixture.confirmations.length, 0);
   assert.equal(fixture.nativeRequests.length, 0);
   assert.equal(fixture.tabs.length, 0);
@@ -253,14 +279,41 @@ test('updates added links and href changes incrementally without document rescan
   anchor.href = 'https://example.test/';
   fixture.notify(fixture.document, [{ type: 'attributes', target: anchor }]);
   assert.equal(anchor.classes.size, 0);
+  assert.equal(anchor.children.length, 0);
   anchor.href = ` MAGNET:${magnet.slice(7)} `;
   fixture.notify(fixture.document, [{ type: 'attributes', target: anchor }]);
   assert.ok(anchor.classes.has('light-torrent-magnet-link'));
+  assert.equal(anchor.children.length, 1);
   anchor.href = null;
   fixture.notify(fixture.document, [{ type: 'attributes', target: anchor }]);
   assert.equal(anchor.classes.size, 0);
+  assert.equal(anchor.children.length, 0);
   assert.equal(fixture.document.scans, scans);
   assert.equal(fixture.nativeRequests.length, 0);
+});
+
+test('keeps exactly one icon after page-owned contents when link labels change or icons are removed', async () => {
+  const fixture = await setup({ buildDOM({ document, Element, append }) {
+    const anchor = append(document, new Element(magnet));
+    const label = append(anchor, new Element(null, 'strong'));
+    return { anchor, label };
+  } });
+  const { anchor, label } = fixture.built;
+  const icon = anchor.lastChild;
+  assert.equal(anchor.children[0], label);
+  fixture.notify(fixture.document, [{ type: 'childList', target: anchor, addedNodes: [icon], removedNodes: [] }]);
+  assert.deepEqual(anchor.children, [label, icon]);
+  const suffix = fixture.append(anchor, new fixture.Element(null, 'span'));
+  fixture.notify(fixture.document, [{ type: 'childList', target: anchor, addedNodes: [suffix], removedNodes: [] }]);
+  assert.deepEqual(anchor.children, [label, suffix, icon]);
+  icon.remove();
+  fixture.notify(fixture.document, [{ type: 'childList', target: anchor, addedNodes: [], removedNodes: [icon] }]);
+  assert.deepEqual(anchor.children, [label, suffix, icon]);
+  anchor.href = 'https://example.test/';
+  fixture.notify(fixture.document, [{ type: 'attributes', target: anchor }]);
+  assert.deepEqual(anchor.children, [label, suffix]);
+  fixture.notify(fixture.document, [{ type: 'childList', target: anchor, addedNodes: [], removedNodes: [icon] }]);
+  assert.deepEqual(anchor.children, [label, suffix]);
 });
 
 test('detects late and nested open roots, ignores closed roots, and releases detached observers', async () => {

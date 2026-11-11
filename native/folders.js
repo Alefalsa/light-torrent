@@ -12,7 +12,7 @@ Add-Type -AssemblyName System.Windows.Forms
 $dialog = New-Object System.Windows.Forms.FolderBrowserDialog
 $owner = New-Object System.Windows.Forms.Form
 try {
-  $dialog.Description = 'Choose where Light Torrent saves completed downloads'
+  $dialog.Description = 'Choose where Light Torrent saves downloads'
   $dialog.ShowNewFolderButton = $true
   $dialog.SelectedPath = [Environment]::GetFolderPath('UserProfile')
   $owner.TopMost = $true
@@ -45,7 +45,7 @@ export async function pickCompletedDirectory({ platform = process.platform, run 
     }
     if (platform === 'darwin') {
       result = await run('/usr/bin/osascript', ['-e',
-        'POSIX path of (choose folder with prompt "Choose where Light Torrent saves completed downloads")'],
+        'POSIX path of (choose folder with prompt "Choose where Light Torrent saves downloads")'],
       { timeout: 300000, maxBuffer: 16384 });
       const directory = result.stdout.replace(/\r?\n$/, '');
       if (!directory) throw new Error(canceledMessage);

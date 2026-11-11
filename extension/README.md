@@ -157,9 +157,12 @@ settings, the queue, or Chromium's helper.
 
 ## Use
 
-Magnet links receive a noticeable mint tint and crisp green underline instead
-of a boxy outline. Hover strengthens the tint; keyboard focus adds a clear green
-ring. Their text, foreground color, backgrounds, and layout are unchanged.
+Magnet links receive a small monochrome magnet icon after their contents.
+The icon follows the link's text color and becomes more prominent on hover or
+keyboard focus. There is no added tint, underline, or box; the website's text,
+colors, backgrounds, and existing decorations are preserved. Keyboard focus adds
+a visible ring in the link's own color. The decorative icon is hidden from
+screen readers and does not change the link's text or accessible name.
 Links added later or whose `href`
 changes are updated automatically, including ordinary frames and open shadow
 roots. Plain-text magnets, custom JavaScript buttons, and closed shadow roots
@@ -182,7 +185,7 @@ quick access:
   On first use, it asks for a final folder just like an approved magnet.
 - **Change final folder** opens the native picker without adding a torrent.
   Cancel keeps the current preference. A valid choice is saved and applied to
-  a running client; already-completed files and moves in progress keep their
+  a running client for new downloads only; existing downloads and legacy moves in progress keep their
   locations. This also lets you replace a missing or damaged preference.
 - **Setup and troubleshooting** opens this guide.
 
@@ -198,8 +201,10 @@ intercepted. Browsers may suppress repeated confirmation dialogs; if this
 happens, reload the page and click the link again.
 
 The helper reuses a running client on **port 3000**. New launches use this
-project's default `data` and unfinished `downloads` directories; completed files
-move to the saved final folder and stop seeding. The client continues running after the
+project's default `data` directory. New downloads start directly in the saved
+final folder and finish there without another payload copy, then stop seeding.
+Existing matching destination data is verified and reused; mismatching or
+unverifiable data is preserved and reported as a conflict. The client continues running after the
 browser closes while downloading or moving files, but shuts down after two idle
 minutes if the queue is empty or all torrents are paused/errored/completed. Approving a new
 link resets that review window, even when reusing an idle client.
@@ -209,7 +214,7 @@ is added when the client page opens.
 Concurrent launches are protected by the existing queue lock.
 The final-folder choice is shared across browsers and remembered across client
 restarts. The helper also applies it when reusing a running client. Existing
-completed files are not moved again, and completion moves already in progress
+downloads retain the folder they started in, and legacy completion moves already in progress
 keep their recorded destination.
 
 The preference is saved in `%LOCALAPPDATA%\Light Torrent\settings.json` on
@@ -331,15 +336,15 @@ Use the public-domain/Creative Commons links on
 3. Verify that the download appears without another click on the dashboard.
 4. Stop the client, approve another magnet, and verify it starts automatically.
    The saved final folder should be reused without another picker.
-5. Check the mint tint and underline on ordinary and dynamically added magnet
-   links, including open shadow roots. Hover for a stronger tint or tab to a link
-   for its focus ring. Changing its URL to an ordinary web link should remove
-   the highlight.
+5. Check the trailing monochrome magnet icon on ordinary and dynamically added
+   magnet links, including open shadow roots. Hover for a stronger icon or tab
+   to a link for its focus ring. Changing its URL to an ordinary web link should
+   remove the icon without changing the page's original link contents.
 6. Open the toolbar and use **Open downloads** without a magnet. It should open
    the dashboard without adding a queue entry.
 7. Use **Change final folder** and cancel: the old preference must remain.
    Repeat with a valid folder and verify the dashboard shows the new destination.
-   Existing completed files must stay in their old locations.
+   Existing active, paused, and completed downloads must stay in their old locations.
 8. While a pause/resume request is pending, polling must not re-enable its
    buttons. Disconnect/restart the client, then verify **Reconnect** restores
    controls without erasing unrelated action errors.

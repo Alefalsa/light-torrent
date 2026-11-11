@@ -110,7 +110,7 @@ final class NativeBridge: NSObject, NSXPCListenerDelegate, LightTorrentNativeBri
         defer { application.setActivationPolicy(.prohibited) }
         let panel = NSOpenPanel()
         panel.title = "Light Torrent"
-        panel.message = "Choose where Light Torrent saves completed downloads"
+        panel.message = "Choose where Light Torrent saves downloads"
         panel.prompt = "Choose"
         panel.canChooseFiles = false
         panel.canChooseDirectories = true

@@ -37,7 +37,7 @@ helper for its extension ID. **Both the extension and helper are required for
 the browser workflow, even if the client is already running.**
 
 Approve a magnet link on a website. On the first approved link, a native folder
-picker asks where completed downloads should go. Choose your actual Downloads
+picker asks where downloads should go. Choose your actual Downloads
 folder or another destination; the choice is saved for future downloads.
 Canceling does not start the client or add the magnet and lets you choose again
 on the next approval. The helper then starts the client automatically
@@ -61,8 +61,8 @@ the extension's native-helper installation.
   reuses existing data.
 - Remove clears the queue entry **without deleting downloaded files**.
 - The queue survives restarts, including paused state and received metadata.
-- Once verified complete, torrents stop seeding and move to your **chosen final folder**.
-  The queue shows **Completed** and the new file location. Completed entries do
+- Downloads start directly in your **chosen final folder**, with no second payload copy.
+  Once verified complete, torrents stop seeding and the queue shows **Completed**. Completed entries do
   not resume seeding after restart; removing them does not delete their files.
 - Stop with **Ctrl+C** to save progress and close connections cleanly.
 - With no active torrents, the server saves the queue and exits after **two
@@ -75,17 +75,24 @@ the extension's native-helper installation.
   The standalone Node.js process exits after queue persistence, engine cleanup,
   and lock release, even if a dependency leaves background handles alive.
 
-Unfinished files are saved directly in the app's `downloads/`, without
-client-generated UUID folders. Completed files move into your chosen final
-folder. Multi-file torrents retain their own directory structure. Pause/resume
-verifies and reuses unfinished data instead of creating another folder.
-Staging-file ownership is retained with the queue to prevent a different
-torrent from overwriting the same path, including after removal from the queue.
+Each download keeps the folder selected when it was added, including after a
+restart. Changing folders affects **new downloads only**, not existing active,
+paused, or completed downloads. Multi-file torrents retain their own directory
+structure. Pause/resume verifies and reuses unfinished data instead of creating
+another folder. File ownership is retained with the queue, separately for each
+directory, to prevent another queued torrent from overwriting the same path.
 When preparing another torrent, stale reservations are released only if the
 file is gone and no queued torrent owns it. Paused and errored entries still
-reserve their filenames. Unrecognized existing files are not overwritten.
+reserve their filenames. Existing destination files can be reused without copying
+only after their length and all overlapping torrent pieces verify. Mismatching
+or unverifiable files, symbolic links, and conflicting queued owners stop the
+download without overwriting existing data. For multi-file torrents, verification
+may require neighboring files that share a piece; move conflicting files aside
+before retrying if a boundary cannot be verified.
 
-Completion moves never overwrite an existing destination. If a name conflicts,
+Downloads already queued in the app's old `downloads/` location stay there.
+Previously started completion moves still recover using their saved destinations.
+These legacy moves never overwrite an existing destination. If a name conflicts,
 both files are kept and the torrent shows an error: rename or move the conflicting
 destination, then choose **Retry move**. The torrent remains stopped during this
 process. A small persisted move journal makes interrupted moves recoverable and
@@ -95,8 +102,7 @@ while moving and are removed after installation. Same-volume moves use hard
 links without copying the payload; cross-volume moves use a bounded 64 KiB
 buffer. Shutdown waits for moves, and loss of queue ownership cancels them.
 Completed entries cannot resume; remove an entry before adding it again.
-Re-adding a torrent whose final files still exist will report a destination
-conflict rather than overwriting them.
+Re-adding a torrent rechecks and reuses matching retained files.
 
 Queued downloads from the old UUID-folder layout are moved into `downloads/`
 before being resumed. Empty migrated directories are removed, but old unqueued
@@ -104,7 +110,7 @@ folders and duplicate copies are left untouched. If a destination conflicts,
 the torrent shows an error instead of overwriting either file.
 Each torrent shows its location.
 Queue state is in `data/queue.json`. Do not edit it while the client is running.
-Keep the same download directory between runs to resume existing downloads.
+Do not move a download's files while it is queued.
 The data directory is locked: a second instance cannot open the same queue,
 even on a different port. Clean shutdown releases the lock. After a crash,
 allow 30 seconds for a stale lock to expire before retrying. Do not delete
@@ -121,31 +127,31 @@ Optional configuration:
 macOS / POSIX shell:
 
 ```sh
-PORT=3001 DOWNLOAD_DIR="$HOME/Downloads/LightTorrent" npm start
+PORT=3001 COMPLETED_DIR="$HOME/Downloads/LightTorrent" npm start
 ```
 
 Windows PowerShell:
 
 ```powershell
 $env:PORT = "3001"
-$env:DOWNLOAD_DIR = "$env:USERPROFILE\Downloads\LightTorrent"
+$env:COMPLETED_DIR = "$env:USERPROFILE\Downloads\LightTorrent"
 npm.cmd start
 ```
 
-`DOWNLOAD_DIR` selects unfinished-file storage. Manual startup uses the saved
+`DOWNLOAD_DIR` identifies legacy storage when upgrading an older saved queue;
+keep its original value for that upgrade. Manual startup uses the saved
 final folder, or your home directory's `Downloads` folder if you have not chosen
 one yet; `COMPLETED_DIR` can override it for manual startup. Extension handoffs
 always apply the saved folder choice, including to an already-running client.
-If unfinished and completed directories are the same,
-the torrent simply stops and is marked Completed without moving files.
+New downloads always finish in place without moving files.
 
 The folder preference is stored in `%LOCALAPPDATA%\Light Torrent\settings.json`
 on Windows or `~/Library/Application Support/Light Torrent/settings.json`
 on macOS. To choose again, use **Change final folder** in the extension toolbar.
 Canceling or choosing an unusable folder preserves the old preference.
 Missing, inaccessible, or invalid saved folders produce an error rather
-than silently falling back to a different destination. Already-completed files
-are not relocated, and moves already in progress retain their recorded destination.
+than silently falling back to a different destination. Existing downloads
+are not relocated, and legacy moves already in progress retain their recorded destination.
 An explicit folder change can also recover a damaged preference without
 manually deleting its file.
 

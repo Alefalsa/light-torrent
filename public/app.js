@@ -104,7 +104,7 @@ function render(data) {
   $('#idle-note').textContent = idleShutdownAt ?
     `No active torrents. Client stops in ${Math.max(0, Math.ceil((idleShutdownAt - Date.now()) / 1000))}s. Approve a magnet link to start it again.` : '';
   $('#download-dir').textContent = data.completedDir ?
-    `${data.downloadDir} (unfinished) → ${data.completedDir} (completed)` : data.downloadDir;
+    `${data.completedDir} (new downloads)` : data.downloadDir;
   $('#engine-error').textContent = data.error || '';
   $('#engine-error').hidden = !data.error;
   $('#download-speed').textContent = `${bytes(data.torrents.reduce((sum, torrent) => sum + torrent.downloadSpeed, 0))}/s`;
@@ -167,10 +167,10 @@ function renderActions(row, torrent) {
   row.setAttribute('aria-busy', String(pending));
   const toggle = row.querySelector('.toggle');
   const remove = row.querySelector('.remove');
-  toggle.textContent = torrent.pendingMove ? 'Retry move' : torrent.paused ? 'Resume' : 'Pause';
+  toggle.textContent = torrent.pendingMove ? 'Retry move' : torrent.pendingCompletion ? 'Retry completion' : torrent.paused ? 'Resume' : 'Pause';
   toggle.hidden = !!torrent.completed;
   toggle.disabled = !connected || pending || !!torrent.moving;
-  remove.disabled = !connected || pending || !!torrent.pendingMove;
+  remove.disabled = !connected || pending || !!torrent.pendingMove || !!torrent.pendingCompletion;
   toggle.dataset.action = torrent.paused ? 'resume' : 'pause';
   toggle.setAttribute('aria-label', `${toggle.textContent} ${torrent.name}`);
   remove.setAttribute('aria-label', `Remove ${torrent.name} from the queue`);

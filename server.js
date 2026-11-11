@@ -262,8 +262,8 @@ async function main() {
     throw error;
   }
   console.log(`Light Torrent is ready at http://127.0.0.1:${port}`);
-  console.log(`Downloads: ${app.queue.downloadDir}`);
-  console.log(`Completed downloads: ${app.queue.completedDir}`);
+  console.log(`New downloads: ${app.queue.completedDir}`);
+  console.log(`Legacy download storage: ${app.queue.downloadDir}`);
   let stopping = false;
   const shutdown = async () => {
     if (stopping) return;
