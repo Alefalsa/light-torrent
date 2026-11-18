@@ -3,11 +3,6 @@ importScripts('background.js');
 async function registerSafariScripts() {
   const scripts = [
     {
-      id: 'light-torrent-shadow-roots',
-      js: ['shadow-roots.js'],
-      world: 'MAIN'
-    },
-    {
       id: 'light-torrent-magnets',
       js: ['shared.js', 'content.js'],
       world: 'ISOLATED'
@@ -21,6 +16,9 @@ async function registerSafariScripts() {
     persistAcrossSessions: true
   }));
   const registered = await LightTorrentBridge.api.scripting.getRegisteredContentScripts();
+  if (registered.some(script => script.id === 'light-torrent-shadow-roots')) {
+    await LightTorrentBridge.api.scripting.unregisterContentScripts({ ids: ['light-torrent-shadow-roots'] });
+  }
   const existing = new Set(registered.map(script => script.id));
   const updates = scripts.filter(script => existing.has(script.id));
   const additions = scripts.filter(script => !existing.has(script.id));

@@ -210,7 +210,7 @@ Its toolbar popup provides **Open downloads**, **Change final folder**, and a
 link to installation/troubleshooting instructions, without requesting extra
 browser permissions. Opening the popup alone does not start the client.
 After updating the source, reload the extension and website tabs to apply new
-icons, highlighting, and confirmation behavior.
+link-handling and confirmation behavior. Page links are not decorated or restyled.
 
 For installation, permissions, startup, and download issues, see
 [extension troubleshooting](extension/README.md#troubleshooting).
@@ -220,7 +220,7 @@ For installation, permissions, startup, and download issues, see
 - `server.js`: loopback HTTP API, request protections, and idle shutdown.
 - `lib/queue.js`: validation, persistence, engine lifecycle, and completion moves.
 - `public/`: dashboard HTML, CSS, JavaScript, and SVG favicon.
-- `extension/`: magnet highlighting, approval, and client handoff.
+- `extension/`: magnet click handling, approval, and client handoff.
 - `native/`: Windows/macOS native-messaging installer, folder picker, and client launcher.
 - `test/`: isolated regression tests using temporary storage and local peers.
 

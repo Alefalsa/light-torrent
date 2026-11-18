@@ -19,7 +19,7 @@ test('Safari packaging preserves shared resources and replaces unsupported stati
   assert.equal(manifest.browser_specific_settings.safari.strict_min_version, '18.4');
   assert.deepEqual(manifest.action, original.action);
   assert.deepEqual(manifest.icons, original.icons);
-  assert.equal(original.content_scripts[1].world, 'MAIN');
+  assert.equal(original.content_scripts.length, 1);
 });
 
 test('launch agent is on demand, safely escapes paths, and invokes only the installed helper', () => {
@@ -35,6 +35,7 @@ test('launch agent is on demand, safely escapes paths, and invokes only the inst
 async function registration(existing = [], error = null) {
   const registered = [];
   const updated = [];
+  const removed = [];
   const errors = [];
   const context = vm.createContext({
     importScripts(name) { assert.equal(name, 'background.js'); },
@@ -44,24 +45,23 @@ async function registration(existing = [], error = null) {
         return existing;
       },
       async registerContentScripts(scripts) { registered.push(...scripts); },
-      async updateContentScripts(scripts) { updated.push(...scripts); }
+      async updateContentScripts(scripts) { updated.push(...scripts); },
+      async unregisterContentScripts({ ids }) { removed.push(...ids); }
     } } },
     console: { error: (...args) => errors.push(args) }
   });
   vm.runInContext(await readFile(new URL('../extension/safari-background.js', import.meta.url), 'utf8'), context);
   await new Promise(resolve => setImmediate(resolve));
-  return { registered, updated, errors };
+  return { registered, updated, removed, errors };
 }
 
-test('Safari registers main-world shadow hooks and isolated content scripts at document start', async () => {
+test('Safari registers only isolated click handling at document start', async () => {
   const { registered, updated, errors } = await registration();
-  assert.equal(registered.length, 2);
+  assert.equal(registered.length, 1);
   assert.equal(updated.length, 0);
   assert.equal(errors.length, 0);
-  assert.equal(registered[0].world, 'MAIN');
-  assert.deepEqual([...registered[0].js], ['shadow-roots.js']);
-  assert.equal(registered[1].world, 'ISOLATED');
-  assert.deepEqual([...registered[1].js], ['shared.js', 'content.js']);
+  assert.equal(registered[0].world, 'ISOLATED');
+  assert.deepEqual([...registered[0].js], ['shared.js', 'content.js']);
   for (const script of registered) {
     assert.equal(script.runAt, 'document_start');
     assert.equal(script.allFrames, true);
@@ -71,10 +71,12 @@ test('Safari registers main-world shadow hooks and isolated content scripts at d
   }
 });
 
-test('Safari updates existing registrations without duplicating them and reports registration errors', async () => {
+test('Safari removes the legacy shadow hook, updates click handling, and reports registration errors', async () => {
   const fixture = await registration([{ id: 'light-torrent-shadow-roots' }, { id: 'light-torrent-magnets' }]);
   assert.equal(fixture.registered.length, 0);
-  assert.equal(fixture.updated.length, 2);
+  assert.equal(fixture.updated.length, 1);
+  assert.equal(fixture.updated[0].id, 'light-torrent-magnets');
+  assert.deepEqual(fixture.removed, ['light-torrent-shadow-roots']);
   const failed = await registration([], new Error('Permission denied'));
   assert.equal(failed.registered.length, 0);
   assert.match(failed.errors[0][1].message, /Permission denied/);

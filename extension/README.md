@@ -3,7 +3,7 @@
 A dependency-free Manifest V3 extension for Chrome, Chromium, Edge, Brave,
 and Safari on macOS.
 It is a companion to the local client, not a torrent engine inside the browser.
-Requires Chromium 111 or newer for the open-shadow-root notification hook.
+Requires Chromium 111 or newer.
 Safari requires version 18.4 or newer and full Xcode for its local app build.
 
 ## Requirements
@@ -116,7 +116,7 @@ handoffs.
    opens the extension preferences.
 
 4. In **Safari > Settings > Extensions**, enable **Light Torrent Magnet Links**.
-   Allow it to access the websites where you want magnet highlighting and
+   Allow it to access the websites where you want magnet link
    interception, then reload those website tabs. If the extension does not
    appear immediately after allowing unsigned extensions, close and reopen
    extension settings.
@@ -130,8 +130,9 @@ two idle minutes. There is no always-running HTTP bridge.
 The embedded **Light Torrent Helper** shows Safari's native folder picker;
 canceling it preserves your existing folder and starts no download.
 
-Safari uses dynamic document-start script registrations for both page-world
-shadow hooks and isolated magnet handling, including inherited-origin frames.
+Safari uses a dynamic document-start script registration for isolated magnet
+click handling, including inherited-origin frames. Updates remove the legacy
+page-world shadow-root hook.
 Its `scripting` and HTTP/HTTPS host permissions support these registrations;
 Safari's website-access controls still determine where they run. The Safari
 extension remains sandboxed; only its native bridge can start the existing Node
@@ -157,17 +158,12 @@ settings, the queue, or Chromium's helper.
 
 ## Use
 
-Magnet links receive a small monochrome magnet icon after their contents.
-The icon follows the link's text color and becomes more prominent on hover or
-keyboard focus. There is no added tint, underline, or box; the website's text,
-colors, backgrounds, and existing decorations are preserved. Keyboard focus adds
-a visible ring in the link's own color. The decorative icon is hidden from
-screen readers and does not change the link's text or accessible name.
-Links added later or whose `href`
-changes are updated automatically, including ordinary frames and open shadow
-roots. Plain-text magnets, custom JavaScript buttons, and closed shadow roots
-are not highlighted. Reload the extension and existing website tabs after
-updating it.
+The extension leaves page links and styles unchanged: it adds no magnet icons,
+scans no page elements, observes no DOM mutations, and does not patch shadow-root
+creation. Links are checked only when clicked, including dynamically added links
+and links whose `href` changes. Reload the extension and existing website tabs
+after updating it to remove previously injected icons and scripts. Safari users
+must rebuild with `npm run install:safari` first.
 
 Click a normal `magnet:` link on a website. A browser confirmation dialog asks
 whether to download the magnet. Choose **Cancel** to do nothing, or **OK**
@@ -279,7 +275,7 @@ This extension does not register as your operating system's magnet handler.
 | `node` or `npm` is not found | Install Node.js 22 or newer, reopen the terminal, and check both version commands under Requirements. |
 | Missing package/module when starting the client | Run `npm ci` from the project root, not from `extension` or `native`. |
 | Load unpacked cannot find the manifest | Select the extracted `extension` directory containing `manifest.json`, not the project root or a ZIP. |
-| Magnet links are not highlighted or intercepted | Ensure the extension is enabled and has site access, then reload the website tab. Only real `magnet:` links on HTTP/HTTPS pages are supported; plain text, custom JavaScript buttons, and closed shadow roots are not. |
+| Magnet links are not intercepted | Ensure the extension is enabled and has site access, then reload the website tab. Links are intentionally not highlighted. Only real `magnet:` links on HTTP/HTTPS pages are supported; plain text, custom JavaScript buttons, and closed shadow roots are not. |
 | Auto-start is unavailable or the native host is not found | Run `npm run install:helper -- YOUR_EXTENSION_ID BROWSER` from the project root with the actual extension ID and browser argument from the table above. Reload the extension and website tabs. Starting the client manually alone does not fix a missing helper. |
 | Native host exits or startup fails after moving the project or updating Node.js | Run `npm ci` and rerun the helper installer with the current extension ID. It records the project and Node.js executable paths. Check the platform-specific client log path above if the client launched. |
 | Port 3000 is occupied by another service or an older client | Stop the specific conflicting process, then approve the magnet again. A manually started client can be stopped with Ctrl+C in its terminal. The helper always uses port 3000; changing `PORT` for a manual launch does not change the extension's target. |
@@ -299,15 +295,13 @@ log path above.
 
 The content script needs access to HTTP/HTTPS pages to recognize clicked links.
 You can restrict its site access using your browser's extension settings; it
-will then work only on those sites. It locally examines link URLs to highlight magnets and the clicked link before
+will then work only on those sites. It locally examines the clicked link before
 handoff, does not
 collect page contents or browsing history, and uses no storage, analytics,
 remote services, or third-party libraries.
 
-Highlighting uses a shared stylesheet per frame and DOM mutation observers,
-not polling. Detached shadow roots are no longer observed. A small page-world
-hook delegates to the original `attachShadow` method and signals newly created
-open roots; it has no extension API access and cannot start the client.
+Click handling uses delegated event listeners without page scanning, injected
+styles, DOM mutation observers, or page-world hooks.
 
 After confirmation, the magnet is sent only to the extension's own background
 worker and placed in the local client's URL **fragment**, not a query string.
@@ -336,10 +330,10 @@ Use the public-domain/Creative Commons links on
 3. Verify that the download appears without another click on the dashboard.
 4. Stop the client, approve another magnet, and verify it starts automatically.
    The saved final folder should be reused without another picker.
-5. Check the trailing monochrome magnet icon on ordinary and dynamically added
-   magnet links, including open shadow roots. Hover for a stronger icon or tab
-   to a link for its focus ring. Changing its URL to an ordinary web link should
-   remove the icon without changing the page's original link contents.
+5. Verify that ordinary and dynamically added magnet links, including open
+   shadow roots, retain their original contents and styles with no added icons.
+   Clicking them should still ask for confirmation. Changing a link's URL to an
+   ordinary web link should leave its navigation untouched.
 6. Open the toolbar and use **Open downloads** without a magnet. It should open
    the dashboard without adding a queue entry.
 7. Use **Change final folder** and cancel: the old preference must remain.

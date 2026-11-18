@@ -106,6 +106,7 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
     return node;
   }
   const built = buildDOM({ document, Element, append });
+  const originalAttachShadow = Element.prototype.attachShadow;
   function notify(root, records) {
     const observer = observers.find(observer => observer.root === root && observer.active);
     assert.ok(observer, 'Expected an active observer for this root.');
@@ -177,14 +178,14 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
     console: { error: (...details) => errors.push(details) },
     importScripts(name) { assert.equal(name, 'shared.js'); }
   });
-  for (const name of ['shared.js', 'background.js', 'content.js', 'shadow-roots.js']) {
+  for (const name of ['shared.js', 'background.js', 'content.js']) {
     vm.runInContext(await readFile(new URL(name, folder), 'utf8'), context);
   }
-  async function click({ type = 'click', button = 0, trusted = true, href = magnet } = {}) {
-    const anchor = new Element(href);
+  async function click({ type = 'click', button = 0, trusted = true, href = magnet,
+    anchor = new Element(href), path = [new Element(null, 'span'), anchor] } = {}) {
     const event = {
       type, button, isTrusted: trusted, prevented: false, stopped: false,
-      composedPath: () => [new Element(null, 'span'), anchor],
+      composedPath: () => path,
       preventDefault() { this.prevented = true; },
       stopImmediatePropagation() { this.stopped = true; }
     };
@@ -193,7 +194,7 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
   }
   return { context, tabs, confirmations, alerts, errors, nativeRequests, nativePorts,
     replyNative(result) { nativeReplies.shift()(result); }, dispatch, click,
-    document, Element, observers, rootNotifications, append, notify, built };
+    document, Element, originalAttachShadow, observers, rootNotifications, append, notify, built };
 }
 
 test('manifest requests only native messaging and uses local scripts without external connections', async () => {
@@ -205,8 +206,7 @@ test('manifest requests only native messaging and uses local scripts without ext
   assert.equal(manifest.action.default_popup, 'popup.html');
   assert.deepEqual(manifest.content_scripts[0].js, ['shared.js', 'content.js']);
   assert.equal(manifest.minimum_chrome_version, '111');
-  assert.equal(manifest.content_scripts[1].world, 'MAIN');
-  assert.deepEqual(manifest.content_scripts[1].js, ['shadow-roots.js']);
+  assert.equal(manifest.content_scripts.length, 1);
   for (const script of manifest.content_scripts) {
     assert.equal(script.all_frames, true);
     assert.equal(script.match_about_blank, true);
@@ -222,10 +222,9 @@ test('manifest requests only native messaging and uses local scripts without ext
     assert.equal(icon.readUInt32BE(16), size);
     assert.equal(icon.readUInt32BE(20), size);
   }
-  assert.doesNotMatch(await readFile(new URL('shadow-roots.js', folder), 'utf8'), /chrome\.|sendMessage|fetch\(/);
 });
 
-test('marks magnets with a decorative monochrome icon without restyling links and keeps focus visible', async () => {
+test('leaves page links and styles untouched without scanning or observing the DOM', async () => {
   const fixture = await setup({ buildDOM({ document, Element, append }) {
     const magnets = [magnet, ` MAGNET:${magnet.slice(7)} `].map(href => append(document, new Element(href)));
     const others = ['https://example.test/', null, 'magnet:?' + 'a'.repeat(16384)]
@@ -237,122 +236,33 @@ test('marks magnets with a decorative monochrome icon without restyling links an
     document.adoptedStyleSheets.push(pageStyle);
     return { magnets, others, root, nested, pageStyle };
   } });
-  for (const anchor of fixture.built.magnets) assert.ok(anchor.classes.has('light-torrent-magnet-link'));
-  for (const anchor of fixture.built.others) assert.equal(anchor.classes.size, 0);
-  assert.ok(fixture.built.nested.classes.has('light-torrent-magnet-link'));
-  assert.equal(fixture.document.adoptedStyleSheets[0], fixture.built.pageStyle);
-  const sheet = fixture.document.adoptedStyleSheets[1];
-  assert.equal(fixture.built.root.adoptedStyleSheets[0], sheet);
-  assert.match(sheet.text, /a\.light-torrent-magnet-link > \.light-torrent-magnet-icon/);
-  assert.match(sheet.text, /fill: currentColor/);
-  assert.match(sheet.text, /fill: inherit/);
-  assert.match(sheet.text, /width: 0\.85em/);
-  assert.match(sheet.text, /height: 0\.85em/);
-  assert.match(sheet.text, /margin-inline-start: 0 !important/);
-  assert.match(sheet.text, /:hover > .*:focus-visible > /);
-  assert.match(sheet.text, /:focus-visible\s*\{\s*outline: 2px solid currentColor/);
-  assert.doesNotMatch(sheet.text, /background|box-shadow|text-decoration|#10b981|rgba\(|::after|::before|url\(/);
-  assert.doesNotMatch(sheet.text, /(?:^|\n)\s*(?:color|padding|border[\w-]*|font[\w-]*|content)\s*:/);
-  for (const anchor of [...fixture.built.magnets, fixture.built.nested]) {
-    assert.equal(anchor.children.length, 1);
-    assert.ok(anchor.lastChild.classes.has('light-torrent-magnet-icon'));
-    assert.equal(anchor.lastChild.getAttribute('aria-hidden'), 'true');
-    assert.equal(anchor.lastChild.getAttribute('focusable'), 'false');
-    assert.equal(anchor.lastChild.namespaceURI, 'http://www.w3.org/2000/svg');
-    assert.equal(anchor.lastChild.lastChild.localName, 'path');
-    assert.ok(anchor.lastChild.lastChild.getAttribute('d'));
+  for (const anchor of [...fixture.built.magnets, ...fixture.built.others, fixture.built.nested]) {
+    assert.equal(anchor.classes.size, 0);
+    assert.equal(anchor.children.length, 0);
   }
-  for (const anchor of fixture.built.others) assert.equal(anchor.children.length, 0);
+  assert.deepEqual(fixture.document.adoptedStyleSheets, [fixture.built.pageStyle]);
+  assert.equal(fixture.built.root.adoptedStyleSheets.length, 0);
+  assert.equal(fixture.document.scans, 0);
+  assert.equal(fixture.built.root.scans, 0);
+  assert.equal(fixture.observers.length, 0);
   assert.equal(fixture.confirmations.length, 0);
   assert.equal(fixture.nativeRequests.length, 0);
   assert.equal(fixture.tabs.length, 0);
-  assert.deepEqual(JSON.parse(JSON.stringify(fixture.observers[0].options)),
-    { childList: true, subtree: true, attributes: true, attributeFilter: ['href'] });
 });
 
-test('updates added links and href changes incrementally without document rescans', async () => {
-  const fixture = await setup();
-  const anchor = fixture.append(fixture.document, new fixture.Element(magnet));
-  const scans = fixture.document.scans;
-  fixture.notify(fixture.document, [{ type: 'childList', addedNodes: [anchor], removedNodes: [] }]);
-  assert.ok(anchor.classes.has('light-torrent-magnet-link'));
-  anchor.href = 'https://example.test/';
-  fixture.notify(fixture.document, [{ type: 'attributes', target: anchor }]);
-  assert.equal(anchor.classes.size, 0);
-  assert.equal(anchor.children.length, 0);
-  anchor.href = ` MAGNET:${magnet.slice(7)} `;
-  fixture.notify(fixture.document, [{ type: 'attributes', target: anchor }]);
-  assert.ok(anchor.classes.has('light-torrent-magnet-link'));
-  assert.equal(anchor.children.length, 1);
-  anchor.href = null;
-  fixture.notify(fixture.document, [{ type: 'attributes', target: anchor }]);
-  assert.equal(anchor.classes.size, 0);
-  assert.equal(anchor.children.length, 0);
-  assert.equal(fixture.document.scans, scans);
-  assert.equal(fixture.nativeRequests.length, 0);
-});
-
-test('keeps exactly one icon after page-owned contents when link labels change or icons are removed', async () => {
-  const fixture = await setup({ buildDOM({ document, Element, append }) {
-    const anchor = append(document, new Element(magnet));
-    const label = append(anchor, new Element(null, 'strong'));
-    return { anchor, label };
-  } });
-  const { anchor, label } = fixture.built;
-  const icon = anchor.lastChild;
-  assert.equal(anchor.children[0], label);
-  fixture.notify(fixture.document, [{ type: 'childList', target: anchor, addedNodes: [icon], removedNodes: [] }]);
-  assert.deepEqual(anchor.children, [label, icon]);
-  const suffix = fixture.append(anchor, new fixture.Element(null, 'span'));
-  fixture.notify(fixture.document, [{ type: 'childList', target: anchor, addedNodes: [suffix], removedNodes: [] }]);
-  assert.deepEqual(anchor.children, [label, suffix, icon]);
-  icon.remove();
-  fixture.notify(fixture.document, [{ type: 'childList', target: anchor, addedNodes: [], removedNodes: [icon] }]);
-  assert.deepEqual(anchor.children, [label, suffix, icon]);
-  anchor.href = 'https://example.test/';
-  fixture.notify(fixture.document, [{ type: 'attributes', target: anchor }]);
-  assert.deepEqual(anchor.children, [label, suffix]);
-  fixture.notify(fixture.document, [{ type: 'childList', target: anchor, addedNodes: [], removedNodes: [icon] }]);
-  assert.deepEqual(anchor.children, [label, suffix]);
-});
-
-test('detects late and nested open roots, ignores closed roots, and releases detached observers', async () => {
+test('handles a dynamically added shadow-root link at click time without patching attachShadow', async () => {
   const fixture = await setup();
   const host = fixture.append(fixture.document, new fixture.Element(null, 'section'));
-  fixture.notify(fixture.document, [{ type: 'childList', addedNodes: [host], removedNodes: [] }]);
-  host.dispatchEvent = () => { throw new Error('Page-specific dispatch must not be invoked.'); };
-  fixture.context.Event = () => { throw new Error('Page-specific Event must not be invoked.'); };
   const root = host.attachShadow({ mode: 'open' });
-  const anchor = fixture.append(root, new fixture.Element(magnet));
-  fixture.notify(root, [{ type: 'childList', addedNodes: [anchor], removedNodes: [] }]);
-  assert.ok(anchor.classes.has('light-torrent-magnet-link'));
-  const nestedHost = fixture.append(root, new fixture.Element(null, 'section'));
-  const nestedRoot = nestedHost.attachShadow({ mode: 'open' });
-  const nestedLink = fixture.append(nestedRoot, new fixture.Element(magnet));
-  fixture.notify(nestedRoot, [{ type: 'childList', addedNodes: [nestedLink], removedNodes: [] }]);
-  assert.ok(nestedLink.classes.has('light-torrent-magnet-link'));
-  const closedHost = fixture.append(fixture.document, new fixture.Element(null, 'section'));
-  const notifications = fixture.rootNotifications.length;
-  const closed = closedHost.attachShadow({ mode: 'closed' });
-  fixture.append(closed, new fixture.Element(magnet));
-  assert.equal(fixture.rootNotifications.length, notifications);
-  assert.equal(fixture.observers.some(observer => observer.root === closed), false);
-  assert.throws(() => closedHost.attachShadow({ mode: 'invalid' }), TypeError);
-  root.adoptedStyleSheets = [];
-  fixture.notify(root, [{ type: 'childList', addedNodes: [nestedHost], removedNodes: [] }]);
-  assert.equal(root.adoptedStyleSheets[0], fixture.document.adoptedStyleSheets[0]);
-  fixture.document.children.splice(fixture.document.children.indexOf(host), 1);
-  host.parentNode = null;
-  fixture.notify(fixture.document, [{ type: 'childList', addedNodes: [], removedNodes: [host] }]);
-  assert.equal(fixture.observers.filter(observer => observer.active).length, 1);
-  assert.equal(root.adoptedStyleSheets.length, 0);
-  anchor.href = 'https://example.test/';
-  fixture.append(fixture.document, host);
-  fixture.notify(fixture.document, [{ type: 'childList', addedNodes: [host], removedNodes: [] }]);
-  assert.equal(anchor.classes.size, 0);
-  assert.ok(nestedLink.classes.has('light-torrent-magnet-link'));
-  assert.equal(fixture.observers.filter(observer => observer.active).length, 3);
-  assert.equal(fixture.nativeRequests.length, 0);
+  const anchor = fixture.append(root, new fixture.Element('https://example.test/'));
+  anchor.href = magnet;
+  const event = await fixture.click({ anchor, path: [anchor, root, host] });
+  assert.equal(event.prevented, true);
+  assert.equal(fixture.tabs.length, 1);
+  assert.equal(fixture.Element.prototype.attachShadow, fixture.originalAttachShadow);
+  assert.equal(fixture.rootNotifications.length, 0);
+  assert.equal(fixture.observers.length, 0);
+  assert.equal(anchor.children.length, 0);
 });
 
 test('cancel intercepts native navigation but does not open a client tab', async () => {
