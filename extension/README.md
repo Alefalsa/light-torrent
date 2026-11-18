@@ -121,6 +121,16 @@ handoffs.
    appear immediately after allowing unsigned extensions, close and reopen
    extension settings.
 
+If the app is still installed but the extension disappears after a macOS update,
+check **Allow unsigned extensions** first. If it is already enabled, re-register
+the installed extension, then reopen Safari's extension settings:
+
+```sh
+pluginkit -a "$HOME/Applications/Light Torrent Safari.app/Contents/PlugIns/Light Torrent Safari Extension.appex"
+```
+
+If the app is missing or registration fails, rerun `npm run install:safari`.
+
 The toolbar and magnet confirmation flow work like the Chromium version:
 the first approved operation asks for your final folder, starts or reuses the
 local client, and opens the dashboard only after it is ready. Folder preferences
@@ -133,14 +143,14 @@ canceling it preserves your existing folder and starts no download.
 Safari uses a dynamic document-start script registration for isolated magnet
 click handling, including inherited-origin frames. Updates remove the legacy
 page-world shadow-root hook.
-Its `scripting` and HTTP/HTTPS host permissions support these registrations;
+Its `scripting` and HTTP/HTTPS host permissions support this registration;
 Safari's website-access controls still determine where they run. The Safari
 extension remains sandboxed; only its native bridge can start the existing Node
 helper. The containing macOS app is not sandboxed so the Node helper retains
 the existing filesystem and folder-picker behavior. This is a local-development
 installation, not an App Store distribution package.
 
-Rerun `npm run install:safari` after changing extension/native Swift code, moving
+Rerun `npm run install:safari` after changing extension JavaScript or Swift code, moving
 the project, or changing the Node.js executable. Reopen extension settings and
 reload website tabs afterward. Safari helper diagnostics are in
 `~/Library/Logs/Light Torrent/safari-helper.log`; the torrent client's log remains
@@ -204,11 +214,11 @@ and leave the queue automatically. Downloaded files are kept.
 Existing matching destination data is verified and reused; mismatching or
 unverifiable data is preserved and reported as a conflict. The client continues running after the
 browser closes while downloading or moving files, but shuts down after two idle
-minutes if the queue is empty or all torrents are paused/errored/completed. Approving a new
+minutes if the queue is empty or all torrents are paused/errored. Approving a new
 link resets that review window, even when reusing an idle client.
 Starting restores the queue: existing unpaused torrents may
-resume downloading; older completed entries are cleared without deleting files. The newly approved magnet
-is added when the client page opens.
+resume downloading; older completed entries are cleared without deleting files.
+The newly approved magnet is added when the client page opens.
 Concurrent launches are protected by the existing queue lock.
 The final-folder choice is shared across browsers and remembered across client
 restarts. The helper also applies it when reusing a running client. Existing
@@ -330,6 +340,9 @@ Use the public-domain/Creative Commons links on
 2. Click again and approve: the client should open and add the magnet.
    On first use, choose a final folder; canceling must not start or add the download.
 3. Verify that the download appears without another click on the dashboard.
+   When it finishes, its queue entry should disappear and its downloaded files
+   should remain in the final folder. Failed finalization must remain visible
+   for retry instead of clearing the entry.
 4. Stop the client, approve another magnet, and verify it starts automatically.
    The saved final folder should be reused without another picker.
 5. Verify that ordinary and dynamically added magnet links, including open

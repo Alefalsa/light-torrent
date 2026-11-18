@@ -17,101 +17,48 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
   const nativeRequests = [];
   const nativeReplies = [];
   const nativePorts = [];
-  const observers = [];
-  const rootNotifications = [];
   let onMessage;
   class Root {
-    constructor(nodeType) {
-      this.nodeType = nodeType;
+    constructor() {
       this.children = [];
-      this.parentNode = null;
       this.adoptedStyleSheets = [];
-      this.scans = 0;
     }
-    get isConnected() {
-      return this.nodeType === 9 || Boolean(this.host?.isConnected || this.parentNode?.isConnected);
+    querySelectorAll() {
+      assert.fail('Content scripts must not scan the DOM.');
     }
-    get lastChild() { return this.children.at(-1) ?? null; }
-    querySelectorAll(selector) {
-      assert.equal(selector, '*');
-      this.scans++;
-      const result = [];
-      function visit(node) {
-        for (const child of node.children) { result.push(child); visit(child); }
-      }
-      visit(this);
-      return result;
-    }
-  }
-  class ShadowRoot extends Root {
-    constructor(host, mode) { super(11); this.host = host; this.mode = mode; }
   }
   class Element extends Root {
     constructor(href, localName = 'a') {
-      super(1);
+      super();
       this.href = href;
       this.localName = localName;
       this.shadowRoot = null;
       this.classes = new Set();
-      this.attributes = new Map();
       this.classList = {
         toggle: (name, enabled) => enabled ? this.classes.add(name) : this.classes.delete(name),
         add: name => this.classes.add(name)
       };
     }
     hasAttribute(name) { return name === 'href' && this.href !== null; }
-    getAttribute(name) { return name === 'href' ? this.href : this.attributes.get(name) ?? null; }
-    setAttribute(name, value) { this.attributes.set(name, value); }
-    append(node) { append(this, node); }
-    remove() {
-      if (this.parentNode) this.parentNode.children.splice(this.parentNode.children.indexOf(this), 1);
-      this.parentNode = null;
+    getAttribute(name) { return name === 'href' ? this.href : null; }
+    attachShadow() {
+      this.shadowRoot = new Root();
+      return this.shadowRoot;
     }
-    attachShadow(options) {
-      if (!['open', 'closed'].includes(options?.mode)) throw new TypeError('Invalid shadow mode.');
-      const root = new ShadowRoot(this, options.mode);
-      if (root.mode === 'open') this.shadowRoot = root;
-      return root;
-    }
-    dispatchEvent(event) {
-      rootNotifications.push(event);
-      event.path = [];
-      for (let node = this; node; node = node.host ?? node.parentNode) event.path.push(node);
-      if (this.isConnected) handlers.get(event.type)?.(event);
-      return true;
-    }
-  }
-  class Event {
-    constructor(type, options) { this.type = type; Object.assign(this, options); }
-    composedPath() { return this.path; }
   }
   class CSSStyleSheet {
-    replaceSync(text) { this.text = text; }
+    constructor() { assert.fail('Content scripts must not inject styles.'); }
   }
   class MutationObserver {
-    constructor(callback) { this.callback = callback; observers.push(this); }
-    observe(root, options) { this.root = root; this.options = options; this.active = true; }
-    disconnect() { this.active = false; }
+    constructor() { assert.fail('Content scripts must not observe DOM mutations.'); }
   }
-  const document = new Root(9);
-  document.createElementNS = (namespace, name) => {
-    const element = new Element(null, name);
-    element.namespaceURI = namespace;
-    return element;
-  };
+  const document = new Root();
   function append(parent, node) {
-    if (node.parentNode) node.parentNode.children.splice(node.parentNode.children.indexOf(node), 1);
     parent.children.push(node);
-    node.parentNode = parent;
     return node;
   }
   const built = buildDOM({ document, Element, append });
   const originalAttachShadow = Element.prototype.attachShadow;
-  function notify(root, records) {
-    const observer = observers.find(observer => observer.root === root && observer.active);
-    assert.ok(observer, 'Expected an active observer for this root.');
-    observer.callback(records);
-  }
   function dispatch(message, from = sender) {
     return new Promise(resolve => {
       const pending = onMessage(message, from, resolve);
@@ -168,7 +115,7 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
   const browser = safari ? { ...chrome, runtime: { ...chrome.runtime } } : undefined;
   if (safari) chrome.runtime.sendNativeMessage = () => { throw new Error("Use Safari's promise-based browser namespace."); };
   const context = vm.createContext({
-    chrome, browser, Element, ShadowRoot, Event, CSSStyleSheet, MutationObserver, document, URLSearchParams,
+    chrome, browser, Element, CSSStyleSheet, MutationObserver, document, URLSearchParams,
     window: { addEventListener(name, handler, capture) {
       assert.equal(capture, true);
       handlers.set(name, handler);
@@ -192,9 +139,9 @@ async function setup({ approved = true, tabError = null, nativeError = null, nat
     await handlers.get(type)(event);
     return event;
   }
-  return { context, tabs, confirmations, alerts, errors, nativeRequests, nativePorts,
+  return { tabs, confirmations, alerts, errors, nativeRequests, nativePorts,
     replyNative(result) { nativeReplies.shift()(result); }, dispatch, click,
-    document, Element, originalAttachShadow, observers, rootNotifications, append, notify, built };
+    document, Element, originalAttachShadow, append, built };
 }
 
 test('manifest requests only native messaging and uses local scripts without external connections', async () => {
@@ -242,9 +189,6 @@ test('leaves page links and styles untouched without scanning or observing the D
   }
   assert.deepEqual(fixture.document.adoptedStyleSheets, [fixture.built.pageStyle]);
   assert.equal(fixture.built.root.adoptedStyleSheets.length, 0);
-  assert.equal(fixture.document.scans, 0);
-  assert.equal(fixture.built.root.scans, 0);
-  assert.equal(fixture.observers.length, 0);
   assert.equal(fixture.confirmations.length, 0);
   assert.equal(fixture.nativeRequests.length, 0);
   assert.equal(fixture.tabs.length, 0);
@@ -260,8 +204,6 @@ test('handles a dynamically added shadow-root link at click time without patchin
   assert.equal(event.prevented, true);
   assert.equal(fixture.tabs.length, 1);
   assert.equal(fixture.Element.prototype.attachShadow, fixture.originalAttachShadow);
-  assert.equal(fixture.rootNotifications.length, 0);
-  assert.equal(fixture.observers.length, 0);
   assert.equal(anchor.children.length, 0);
 });
 

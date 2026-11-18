@@ -66,7 +66,7 @@ the extension's native-helper installation.
   removed from the queue. Downloaded files are kept in their final folder.
 - Stop with **Ctrl+C** to save progress and close connections cleanly.
 - With no active torrents, the server saves the queue and exits after **two
-  minutes**. Paused, errored, and completed torrents do not keep it running;
+  minutes**. Paused and errored torrents do not keep it running;
   downloading, finding metadata, and moving completed files do. Opening the client page or approving a
   magnet through the extension resets the idle review window. Stats polling
   does not keep the server alive. The UI shows the countdown and stops polling
@@ -199,20 +199,23 @@ remote-access server and should not be exposed through a reverse proxy.
 
 ## Browser extension
 
-The [Chromium extension](extension/README.md) is the normal way to add downloads.
+The [browser extension](extension/README.md) is the normal way to add downloads.
 It recognizes clicked magnet links on websites, asks for confirmation, and
 opens the local client with the link in its URL fragment.
 The client adds the magnet directly after extension
 approval; there is no second confirmation on the dashboard.
-Install the `extension` directory through your browser's **Load unpacked** option,
-then install the Windows or macOS native-messaging helper using the guide linked above.
+For Chromium browsers, load the `extension` directory with **Load unpacked**,
+then install the Windows or macOS native-messaging helper. For Safari, build and
+install the macOS app with `npm run install:safari`; its native bridge is included.
+See the guide linked above for either setup.
 The extension always calls the helper before opening a client tab, including
 when reusing a running client on port 3000. There is no helper-free fallback.
 Its toolbar popup provides **Open downloads**, **Change final folder**, and a
-link to installation/troubleshooting instructions, without requesting extra
-browser permissions. Opening the popup alone does not start the client.
-After updating the source, reload the extension and website tabs to apply new
-link-handling and confirmation behavior. Page links are not decorated or restyled.
+link to installation/troubleshooting instructions. Opening the popup alone does
+not start the client. After updating extension code, reload the extension and
+website tabs; Safari requires rerunning `npm run install:safari` first.
+Client code changes take effect after the Node.js client restarts.
+Page links are not decorated or restyled.
 
 For installation, permissions, startup, and download issues, see
 [extension troubleshooting](extension/README.md#troubleshooting).
@@ -221,9 +224,11 @@ For installation, permissions, startup, and download issues, see
 
 - `server.js`: loopback HTTP API, request protections, and idle shutdown.
 - `lib/queue.js`: validation, persistence, engine lifecycle, and completion moves.
+- `lib/settings.js`: saved final-folder preferences and directory validation.
 - `public/`: dashboard HTML, CSS, JavaScript, and SVG favicon.
 - `extension/`: magnet click handling, approval, and client handoff.
 - `native/`: Windows/macOS native-messaging installer, folder picker, and client launcher.
+- `safari/`: macOS app packaging, sandboxed extension handler, and on-demand native bridge.
 - `test/`: isolated regression tests using temporary storage and local peers.
 
 Runtime queue data, downloads, dependencies, local environment files, and logs
@@ -233,6 +238,8 @@ After changing dependencies, verify `npm ci` in a clean checkout: an existing
 Configuration uses environment variables; the app does not load `.env` files.
 The API retains `.torrent` source parsing for saved magnet metadata and existing
 API clients, although uploads are no longer offered in the dashboard.
+The runtime dependencies are `webtorrent` for the engine, `parse-torrent` for
+source validation, and `proper-lockfile` for queue and folder-preference locks.
 
 ## Validate
 
