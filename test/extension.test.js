@@ -271,11 +271,21 @@ test('cancel intercepts native navigation but does not open a client tab', async
   assert.equal(event.prevented, true);
   assert.equal(event.stopped, true);
   assert.equal(fixture.confirmations.length, 1);
-  assert.match(fixture.confirmations[0], /Download this magnet link/);
-  assert.match(fixture.confirmations[0], /adds this torrent to its queue immediately/);
-  assert.doesNotMatch(fixture.confirmations[0], /click Add torrent/);
+  assert.equal(fixture.confirmations[0],
+    'Light Torrent\n\nStart this download?\n\nExample File\n\nQueued downloads may also resume.');
   assert.equal(fixture.tabs.length, 0);
   assert.equal(fixture.nativeRequests.length, 0);
+});
+
+test('download confirmation stays concise without a name and bounds long names', async () => {
+  const fixture = await setup({ approved: false });
+  const unnamed = `magnet:?xt=urn:btih:${'a'.repeat(40)}`;
+  await fixture.click({ href: unnamed });
+  assert.equal(fixture.confirmations[0],
+    'Light Torrent\n\nStart this download?\n\nQueued downloads may also resume.');
+  await fixture.click({ href: `${unnamed}&dn=${'a'.repeat(300)}` });
+  assert.equal(fixture.confirmations[1],
+    `Light Torrent\n\nStart this download?\n\n${'a'.repeat(200)}\n\nQueued downloads may also resume.`);
 });
 
 test('approval opens only the fixed local client with an encoded fragment', async () => {

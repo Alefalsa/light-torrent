@@ -165,8 +165,9 @@ and links whose `href` changes. Reload the extension and existing website tabs
 after updating it to remove previously injected icons and scripts. Safari users
 must rebuild with `npm run install:safari` first.
 
-Click a normal `magnet:` link on a website. A browser confirmation dialog asks
-whether to download the magnet. Choose **Cancel** to do nothing, or **OK**
+Click a normal `magnet:` link on a website. A short browser confirmation asks
+**Start this download?**, shows the name when available, and notes that queued
+downloads may also resume. Choose **Cancel** to do nothing, or **OK**
 to have the local helper ask for a final folder on first use, start the client
 if needed, wait for readiness, then
 open `http://127.0.0.1:3000` and add the magnet directly to the queue.
@@ -198,14 +199,15 @@ happens, reload the page and click the link again.
 
 The helper reuses a running client on **port 3000**. New launches use this
 project's default `data` directory. New downloads start directly in the saved
-final folder and finish there without another payload copy, then stop seeding.
+final folder and finish there without another payload copy, then stop seeding
+and leave the queue automatically. Downloaded files are kept.
 Existing matching destination data is verified and reused; mismatching or
 unverifiable data is preserved and reported as a conflict. The client continues running after the
 browser closes while downloading or moving files, but shuts down after two idle
 minutes if the queue is empty or all torrents are paused/errored/completed. Approving a new
 link resets that review window, even when reusing an idle client.
 Starting restores the queue: existing unpaused torrents may
-resume downloading; completed entries remain stopped. The newly approved magnet
+resume downloading; older completed entries are cleared without deleting files. The newly approved magnet
 is added when the client page opens.
 Concurrent launches are protected by the existing queue lock.
 The final-folder choice is shared across browsers and remembered across client

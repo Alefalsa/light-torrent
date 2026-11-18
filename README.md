@@ -62,8 +62,8 @@ the extension's native-helper installation.
 - Remove clears the queue entry **without deleting downloaded files**.
 - The queue survives restarts, including paused state and received metadata.
 - Downloads start directly in your **chosen final folder**, with no second payload copy.
-  Once verified complete, torrents stop seeding and the queue shows **Completed**. Completed entries do
-  not resume seeding after restart; removing them does not delete their files.
+  Once verified complete and finalized, torrents stop seeding and are automatically
+  removed from the queue. Downloaded files are kept in their final folder.
 - Stop with **Ctrl+C** to save progress and close connections cleanly.
 - With no active torrents, the server saves the queue and exits after **two
   minutes**. Paused, errored, and completed torrents do not keep it running;
@@ -101,8 +101,10 @@ Temporary hidden `.light-torrent-*.part` files may appear in the destination
 while moving and are removed after installation. Same-volume moves use hard
 links without copying the payload; cross-volume moves use a bounded 64 KiB
 buffer. Shutdown waits for moves, and loss of queue ownership cancels them.
-Completed entries cannot resume; remove an entry before adding it again.
-Re-adding a torrent rechecks and reuses matching retained files.
+Completed entries saved by older versions are removed from the queue on startup
+without deleting files. Re-adding a torrent rechecks and reuses matching retained files.
+If finalization or saving the updated queue fails, the entry stays visible with
+an error so it can be retried instead of losing track of its files.
 
 Queued downloads from the old UUID-folder layout are moved into `downloads/`
 before being resumed. Empty migrated directories are removed, but old unqueued

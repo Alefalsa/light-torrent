@@ -171,7 +171,27 @@ test('first extension use applies the chosen folder and legacy completion moves 
   await app.close();
   const reopened = await fixture.open();
   assert.equal(reopened.app.queue.completedDir, finalFolder);
-  assert.equal(reopened.app.queue.snapshot().torrents[0].path, finalFolder);
+  assert.deepEqual(reopened.app.queue.snapshot().torrents, []);
+  assert.equal(await readFile(path.join(finalFolder, 'complete.txt'), 'utf8'), 'A verified completion fixture.');
+});
+
+test('restoring an older queue removes completed entries but keeps files and unfinished downloads', async t => {
+  const fixture = await completedFixture(t);
+  const { app, entry, files, root } = fixture;
+  await app.queue.scheduleCompletion(entry, files);
+  const pending = await app.queue.add({ kind: 'magnet', value: `magnet:?xt=urn:btih:${'b'.repeat(40)}` });
+  await app.queue.action(pending.id, 'pause');
+  await app.close();
+  const stateFile = path.join(root, 'data/queue.json');
+  const state = JSON.parse(await readFile(stateFile, 'utf8'));
+  const { torrent, ...completed } = entry;
+  state.torrents.push(completed);
+  await writeFile(stateFile, JSON.stringify(state));
+  const reopened = await fixture.open();
+  assert.deepEqual(reopened.app.queue.snapshot().torrents.map(record => record.id), [pending.id]);
+  assert.equal(reopened.app.queue.snapshot().torrents[0].status, 'Paused');
+  assert.deepEqual(JSON.parse(await readFile(stateFile, 'utf8')).torrents.map(record => record.id), [pending.id]);
+  assert.equal(await readFile(path.join(root, 'finished/complete.txt'), 'utf8'), 'A verified completion fixture.');
 });
 
 test('toolbar folder changes apply to a running client and cancellation preserves its destination', async t => {
@@ -509,7 +529,7 @@ test('rejects unsupported filenames in every path component before reserving fil
   }
 });
 
-test('downloads a real magnet directly into its final folder, stops seeding, and restores completed state', async t => {
+test('downloads a real magnet, stops seeding, and persistently removes the entry without deleting files', async t => {
   const fixture = await setup(t, { idleTimeoutMs: 500 });
   const seeder = new WebTorrent(offline);
   t.after(() => new Promise(resolve => seeder.destroy(resolve)));
@@ -534,20 +554,22 @@ test('downloads a real magnet directly into its final folder, stops seeding, and
   assert.equal(added.body.path, path.join(fixture.root, 'finished'));
   assert.deepEqual(await readdir(path.join(fixture.root, 'downloads')), []);
   assert.deepEqual(await readFile(destination), content);
-  assert.equal(fixture.app.queue.snapshot().torrents[0].status, 'Completed');
-  assert.equal(fixture.app.queue.snapshot().torrents[0].path, path.dirname(destination));
+  assert.deepEqual(fixture.app.queue.snapshot().torrents, []);
   assert.equal(fixture.app.queue.client.torrents.length, 0);
-  assert.equal(fixture.app.queue.snapshot().torrents[0].progress, 1);
+  const saved = JSON.parse(await readFile(fixture.app.queue.stateFile, 'utf8'));
+  assert.deepEqual(saved.torrents, []);
+  const key = fixture.app.queue.fileKey('sample.txt', path.dirname(destination));
+  assert.equal(saved.files[key], entry.infoHash);
   assert.equal(entry.source.kind, 'file');
-  assert.equal((await fixture.post('/api/torrents', entry.source)).status, 409);
   await waitFor(() => !fixture.app.server.listening);
   await fixture.app.close();
   const reopened = await fixture.open();
-  assert.equal(reopened.app.queue.snapshot().torrents[0].status, 'Completed');
+  assert.deepEqual(reopened.app.queue.snapshot().torrents, []);
   assert.equal(reopened.app.queue.client.torrents.length, 0);
   assert.deepEqual(await readFile(destination), content);
-  assert.equal((await reopened.post(`/api/torrents/${entry.id}/resume`)).status, 409);
-  assert.equal((await reopened.post(`/api/torrents/${entry.id}/remove`)).status, 200);
+  assert.equal((await reopened.post(`/api/torrents/${entry.id}/resume`)).status, 404);
+  assert.equal((await reopened.post('/api/torrents', entry.source)).status, 201);
+  await waitFor(() => reopened.app.queue.entries.size === 0);
   assert.deepEqual(await readFile(destination), content);
 });
 
@@ -701,7 +723,7 @@ test('version two restores pin unfinished downloads and upgrade relative ownersh
   assert.equal(await readFile(path.join(entry.downloadDirectory, 'legacy.txt'), 'utf8'), content);
   const upgraded = JSON.parse(await readFile(stateFile, 'utf8'));
   assert.equal(upgraded.version, 3);
-  assert.equal(upgraded.torrents[0].downloadDirectory, entry.downloadDirectory);
+  assert.deepEqual(upgraded.torrents, []);
   assert.equal(upgraded.files[queue.fileKey('legacy.txt')], entry.infoHash);
 });
 
@@ -782,7 +804,7 @@ test('moving files keep the server awake and graceful shutdown waits for the mov
   clearTimeout(watchdog);
   assert.equal(entry.completed, true);
   assert.equal(stopped, true);
-  assert.equal(JSON.parse(await readFile(path.join(root, 'data/queue.json'), 'utf8')).torrents[0].completed, true);
+  assert.deepEqual(JSON.parse(await readFile(path.join(root, 'data/queue.json'), 'utf8')).torrents, []);
   assert.equal((await readdir(path.join(root, 'data'))).includes('queue.lock'), false);
 });
 
@@ -792,11 +814,12 @@ test('a failed final save leaves a recoverable move journal after the files have
   const save = app.queue.save;
   app.queue.save = function (records = this.entries.values()) {
     const list = [...records];
-    if (list.some(record => record.completed)) throw new Error('Final save failed');
+    if (!list.some(record => record.id === entry.id)) throw new Error('Final save failed');
     return save.call(this, list);
   };
   await app.queue.scheduleCompletion(entry, files);
   assert.match(entry.error, /Final save failed/);
+  assert.equal(app.queue.entries.get(entry.id), entry);
   assert.equal(entry.completed, undefined);
   assert.ok(entry.transfer.files[0].identity);
   assert.deepEqual(await readdir(path.join(root, 'downloads')), []);
@@ -804,9 +827,7 @@ test('a failed final save leaves a recoverable move journal after the files have
   app.queue.save = save;
   await app.close();
   const reopened = await fixture.open();
-  const restored = reopened.app.queue.entries.get(entry.id);
-  await waitFor(() => restored.completed);
-  assert.equal(restored.error, null);
+  await waitFor(() => !reopened.app.queue.entries.has(entry.id));
   assert.equal(reopened.app.queue.client.torrents.length, 0);
   assert.deepEqual(await readdir(path.join(root, 'finished')), ['complete.txt']);
 });
@@ -845,9 +866,7 @@ test('interrupted copies are restored from verified sources, not accepted by fil
   app.queue.save();
   await app.close();
   const reopened = await fixture.open();
-  const restored = reopened.app.queue.entries.get(entry.id);
-  await waitFor(() => restored.completed);
-  assert.equal(restored.error, null);
+  await waitFor(() => !reopened.app.queue.entries.has(entry.id));
   assert.equal(await readFile(path.join(directory, 'recovered.txt'), 'utf8'), content);
   assert.deepEqual(await readdir(directory), ['recovered.txt']);
   assert.deepEqual(await readdir(path.join(root, 'downloads')), []);

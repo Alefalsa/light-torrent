@@ -10,7 +10,7 @@
     event.stopImmediatePropagation();
     const name = new URLSearchParams(magnet.slice(magnet.indexOf('?') + 1)).get('dn');
     const label = name ? `\n\n${name.slice(0, 200)}` : '';
-    if (!confirm(`Light Torrent\n\nDownload this magnet link?${label}\n\nApproving starts or opens the local client and adds this torrent to its queue immediately. On first use, choose a final download folder before startup. Starting the client may also resume active torrents already saved in its queue.`)) return;
+    if (!confirm(`Light Torrent\n\nStart this download?${label}\n\nQueued downloads may also resume.`)) return;
     try {
       const result = await LightTorrentBridge.api.runtime.sendMessage({ type: 'open-light-torrent', magnet });
       if (!result?.ok) throw new Error(result?.error || 'The extension did not respond.');
